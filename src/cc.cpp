@@ -21,14 +21,50 @@ CustomController::CustomController(RobotData &rd) : rd_(rd), //, wbc_(dc.wbc_)
         }
         else
         {
-            writeFile.open("/home/cha/catkin_ws/src/tocabi_cc/result/data.csv", std::ofstream::out);
+            writeFile.open("/home/rui/ubuntu-20-04/raibertGRU_ws/src/tocabi_cc/result/data.csv", std::ofstream::out);
         }
         writeFile << std::fixed << std::setprecision(8);
+        
+        // Write CSV header
+        writeFile << "time\t"
+                  << "LF_FT_fx\tLF_FT_fy\tLF_FT_fz\tLF_FT_tx\tLF_FT_ty\tLF_FT_tz\t"
+                  << "RF_FT_fx\tRF_FT_fy\tRF_FT_fz\tRF_FT_tx\tRF_FT_ty\tRF_FT_tz\t"
+                  << "torque_des_0\ttorque_des_1\ttorque_des_2\ttorque_des_3\ttorque_des_4\ttorque_des_5\t"
+                  << "torque_des_6\ttorque_des_7\ttorque_des_8\ttorque_des_9\ttorque_des_10\ttorque_des_11\t"
+                  << "torque_des_12\ttorque_des_13\ttorque_des_14\ttorque_des_15\ttorque_des_16\ttorque_des_17\t"
+                  << "torque_des_18\ttorque_des_19\ttorque_des_20\ttorque_des_21\ttorque_des_22\ttorque_des_23\t"
+                  << "torque_des_24\ttorque_des_25\ttorque_des_26\ttorque_des_27\ttorque_des_28\ttorque_des_29\t"
+                  << "torque_des_30\ttorque_des_31\ttorque_des_32\t"
+                  << "q_0\tq_1\tq_2\tq_3\tq_4\tq_5\tq_6\tq_7\tq_8\tq_9\tq_10\tq_11\t"
+                  << "q_12\tq_13\tq_14\tq_15\tq_16\tq_17\tq_18\tq_19\tq_20\tq_21\tq_22\tq_23\t"
+                  << "q_24\tq_25\tq_26\tq_27\tq_28\tq_29\tq_30\tq_31\tq_32\t"
+                  << "qdot_lpf_0\tqdot_lpf_1\tqdot_lpf_2\tqdot_lpf_3\tqdot_lpf_4\tqdot_lpf_5\t"
+                  << "qdot_lpf_6\tqdot_lpf_7\tqdot_lpf_8\tqdot_lpf_9\tqdot_lpf_10\tqdot_lpf_11\t"
+                  << "qdot_lpf_12\tqdot_lpf_13\tqdot_lpf_14\tqdot_lpf_15\tqdot_lpf_16\tqdot_lpf_17\t"
+                  << "qdot_lpf_18\tqdot_lpf_19\tqdot_lpf_20\tqdot_lpf_21\tqdot_lpf_22\tqdot_lpf_23\t"
+                  << "qdot_lpf_24\tqdot_lpf_25\tqdot_lpf_26\tqdot_lpf_27\tqdot_lpf_28\tqdot_lpf_29\t"
+                  << "qdot_lpf_30\tqdot_lpf_31\tqdot_lpf_32\t"
+                  << "base_lin_vel_x\tbase_lin_vel_y\tbase_lin_vel_z\t"
+                  << "base_ang_vel_x\tbase_ang_vel_y\tbase_ang_vel_z\t"
+                  << "qdot_0\tqdot_1\tqdot_2\tqdot_3\tqdot_4\tqdot_5\tqdot_6\tqdot_7\tqdot_8\tqdot_9\t"
+                  << "qdot_10\tqdot_11\tqdot_12\tqdot_13\tqdot_14\tqdot_15\tqdot_16\tqdot_17\tqdot_18\tqdot_19\t"
+                  << "qdot_20\tqdot_21\tqdot_22\tqdot_23\tqdot_24\tqdot_25\tqdot_26\tqdot_27\tqdot_28\tqdot_29\t"
+                  << "qdot_30\tqdot_31\tqdot_32\t"
+                  << "qvirt_0\tqvirt_1\tqvirt_2\tqvirt_3\tqvirt_4\tqvirt_5\tqvirt_6\tqvirt_7\tqvirt_8\tqvirt_9\t"
+                  << "qvirt_10\tqvirt_11\tqvirt_12\tqvirt_13\tqvirt_14\tqvirt_15\tqvirt_16\tqvirt_17\tqvirt_18\tqvirt_19\t"
+                  << "qvirt_20\tqvirt_21\tqvirt_22\tqvirt_23\tqvirt_24\tqvirt_25\tqvirt_26\tqvirt_27\tqvirt_28\tqvirt_29\t"
+                  << "qvirt_30\tqvirt_31\tqvirt_32\tqvirt_33\tqvirt_34\tqvirt_35\tqvirt_36\tqvirt_37\tqvirt_38\t"
+                  << "heading\t"
+                  << "value\tstop_flag\t"
+                  << "cmd_x\tcmd_y\tcmd_yaw\t"
+                  << "rf_x\trf_y\trf_z\t"
+                  << "lf_x\tlf_y\tlf_z"
+                  << std::endl;
     }
     initVariable();
     loadOnnX();
 
-    joy_sub_ = nh_.subscribe<sensor_msgs::Joy>("joy", 10, &CustomController::joyCallback, this);
+    joy_sub_ = nh_.subscribe<sensor_msgs::Joy>("joy_wh", 10, &CustomController::joyCallback, this);
 }
 
 void CustomController::initVariable()
@@ -114,12 +150,12 @@ void CustomController::initVariable()
 
 void CustomController::loadOnnX()
 {
-    string cur_path = "/home/cha/catkin_ws/src/tocabi_cc/";
-    string actor_path = "/home/cha/isaac_ws/AMP_for_hardware/logs/onnx/actor.onnx";
-    string normalizer_path = "/home/cha/isaac_ws/AMP_for_hardware/logs/onnx/normalizer.onnx";
-    string denormalizer_path = "/home/cha/isaac_ws/AMP_for_hardware/logs/onnx/denormalizer.onnx";
-    string decoder_path = "/home/cha/isaac_ws/AMP_for_hardware/logs/onnx/decoder.onnx";
-    string critic_path = "/home/cha/isaac_ws/AMP_for_hardware/logs/onnx/critic.onnx";
+    string cur_path = "/home/rui/ubuntu-20-04/raibertGRU_ws/src/tocabi_cc/";
+    string actor_path = "/home/rui/rui_ws/erfi_ws/AMP_framework/logs/onnx/actor.onnx";
+    string normalizer_path = "/home/rui/rui_ws/erfi_ws/AMP_framework/logs/onnx/normalizer.onnx";
+    string denormalizer_path = "/home/rui/rui_ws/erfi_ws/AMP_framework/logs/onnx/denormalizer.onnx";
+    string decoder_path = "/home/rui/rui_ws/erfi_ws/AMP_framework/logs/onnx/decoder.onnx";
+    string critic_path = "/home/rui/rui_ws/erfi_ws/AMP_framework/logs/onnx/critic.onnx";
 
 
     if (is_on_robot_)
@@ -504,6 +540,7 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
     data_idx++;
     if (heading_mode_) commands_(2) = DyrosMath::minmax_cut(2*heading_error_, -1., 1.);
     state_cur_[data_idx] = commands_(2);
+    // cout << "[DEBUG] Heading: " << commands_(2) << endl;
     data_idx++;
     step_period_ = DyrosMath::minmax_cut(min(max_stride_x/(abs(commands_(0))+1.e-6), min(max_stride_y/(abs(commands_(1))+1.e-6), max_stride_yaw/(abs(commands_(2))+1.e-6))), 0.4, 0.8);
     step_ticks_ *= step_period_ / prev_step_period_;
@@ -656,7 +693,18 @@ void CustomController::processEverythingElse()
             writeFile << heading << "\t";
 
             writeFile << value_ << "\t" << stop_by_value_thres_ << "\t";
-            writeFile << commands_(0) << "\t" << commands_(1) << "\t" << commands_(2) <<"\t";
+            writeFile << commands_(0) << "\t" << commands_(1) << "\t" << commands_(2) << "\t";
+            
+            // Right foot global position (x, y, z)
+            writeFile << rd_cc_.link_[Right_Foot].xpos(0) << "\t" 
+                      << rd_cc_.link_[Right_Foot].xpos(1) << "\t" 
+                      << rd_cc_.link_[Right_Foot].xpos(2) << "\t";
+            
+            // Left foot global position (x, y, z)
+            writeFile << rd_cc_.link_[Left_Foot].xpos(0) << "\t" 
+                      << rd_cc_.link_[Left_Foot].xpos(1) << "\t" 
+                      << rd_cc_.link_[Left_Foot].xpos(2) << "\t";
+            
             writeFile << std::endl;
             time_write_pre_ = rd_cc_.control_time_us_;
         }
@@ -845,13 +893,13 @@ void CustomController::joyCallback(const sensor_msgs::Joy::ConstPtr& joy)
         ROS_INFO("Velocity X : %f", vel_scale_x_);
         ROS_INFO("Velocity Y : %f", vel_scale_y_);
     }
-    if(joy->buttons[4] == 1){
+    if(joy->buttons[6] == 1){
         commands_(2) = 0.6;
     }
-    if(joy->buttons[5] == 1){
+    if(joy->buttons[7] == 1){
         commands_(2) = -0.6;
     }
-    if(joy->buttons[5] != 1 && joy->buttons[4] != 1){
+    if(joy->buttons[6] != 1 && joy->buttons[7] != 1){
         commands_(2) = 0.;
     }
 }
