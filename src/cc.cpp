@@ -1,4 +1,7 @@
 #include "cc.h"
+#include <algorithm>
+#include <iomanip>
+#include <cmath>
 
 using namespace TOCABI;
 
@@ -515,7 +518,7 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
     data_idx++;
 
     float prev_step_period_ = step_period_;
-    commands_(0) = 0.5;
+    commands_(0) = 0.2;
     commands_(1) = 0.0;
     commands_(2) = 0.0;
     state_cur_[data_idx] = commands_(0);
@@ -606,42 +609,176 @@ void CustomController::processEverythingElse()
     for (size_t i = 0; i < num_cur_h; i++){
         h_cur_[i] = output_tensors[output_hn_idx_].GetTensorMutableData<float>()[i];
     }
-    // for (size_t i = 0; i < num_cur_latent; i++) {
-    //     latent_cur_[i] = output_tensors[output_latent_idx_].GetTensorMutableData<float>()[i];
-    // }
-    // // cout << "RL Action: " << rl_action_.transpose() << endl;
+    for (size_t i = 0; i < num_cur_latent; i++) {
+        latent_cur_[i] = output_tensors[output_latent_idx_].GetTensorMutableData<float>()[i];
+    }
+    // cout << "RL Action: " << rl_action_.transpose() << endl;
 
-    // std::copy(latent_cur_.begin(),
-    //             latent_cur_.begin() + num_cur_latent,
-    //             input_states_buffer_d[0].begin());
-    // // output tensor to critic obs
-    // output_tensors_d = session_d.Run(Ort::RunOptions{nullptr}, input_names_char_d.data(), input_tensors_d.data(), input_number_d, output_names_char_d.data(), output_number_d);
+    std::copy(latent_cur_.begin(),
+                latent_cur_.begin() + num_cur_latent,
+                input_states_buffer_d[0].begin());
+    // output tensor to critic obs
+    output_tensors_d = session_d.Run(Ort::RunOptions{nullptr}, input_names_char_d.data(), input_tensors_d.data(), input_number_d, output_names_char_d.data(), output_number_d);
 
-    // for (size_t i = 0; i < output_tensors_d.size(); i++) {
-    //     if (!output_tensors_d[i].IsTensor()) {
-    //         std::cerr << "Decoder output " << i << " is not a valid tensor." << std::endl;
-    //         continue;
-    //     }
-    // }
+    for (size_t i = 0; i < output_tensors_d.size(); i++) {
+        if (!output_tensors_d[i].IsTensor()) {
+            std::cerr << "Decoder output " << i << " is not a valid tensor." << std::endl;
+            continue;
+        }
+    }
 
-    // for (size_t i = 0; i < num_cur_critic_state; i++) {
-    //     normalized_critic_state_cur_[i] = output_tensors_d[0].GetTensorMutableData<float>()[i];
-    // }
+    for (size_t i = 0; i < num_cur_critic_state; i++) {
+        normalized_critic_state_cur_[i] = output_tensors_d[0].GetTensorMutableData<float>()[i];
+    }
 
-    // std::copy(normalized_critic_state_cur_.begin(),
-    //             normalized_critic_state_cur_.begin() + num_cur_critic_state,
-    //             input_states_buffer_c[0].begin());
-    // std::copy(normalized_critic_state_cur_.begin(),
-    //             normalized_critic_state_cur_.begin() + num_cur_critic_state,
-    //             input_states_buffer_dn[0].begin());
-    // // output tensor to value_
-    // output_tensors_c = session_c.Run(Ort::RunOptions{nullptr}, input_names_char_c.data(), input_tensors_c.data(), input_number_c, output_names_char_c.data(), output_number_c);
-    // output_tensors_dn = session_dn.Run(Ort::RunOptions{nullptr}, input_names_char_dn.data(), input_tensors_dn.data(), input_number_dn, output_names_char_dn.data(), output_number_dn);
-    // value_ = output_tensors_c[0].GetTensorMutableData<float>()[0];
-    // for (size_t i = 0; i < num_cur_critic_state; i++) {
-    //     critic_state_cur_[i] = output_tensors_dn[0].GetTensorMutableData<float>()[i];
-    // }
-    // std::cout << "value : " << value_ << std::endl;
+    // Debug: Compare normalized observation vs decoder output + Sim2Real gap analysis
+    static int debug_counter = 0;
+    static std::ofstream sim2real_debug_file;
+    static bool file_opened = false;
+    
+    // Open file for sim2real analysis on first call
+    if (!file_opened) {
+        std::string debug_file_path;
+        if (is_on_robot_) {
+            debug_file_path = "/home/dyros/catkin_ws/src/tocabi_cc/result/sim2real_debug_real.csv";
+        } else {
+            debug_file_path = "/home/rui/ubuntu-20-04/raibertGRU_ws/src/tocabi_cc/result/sim2real_debug_sim.csv";
+        }
+        sim2real_debug_file.open(debug_file_path, std::ofstream::out);
+        sim2real_debug_file << std::fixed << std::setprecision(6);
+        // Write header
+        sim2real_debug_file << "iteration\ttime\t"
+                           << "value\t"
+                           << "mse_obs_decoder\tmax_diff_obs_decoder\t"
+                           << "obs_mean\tobs_std\tobs_min\tobs_max\t"
+                           << "decoder_mean\tdecoder_std\tdecoder_min\tdecoder_max\t"
+                           << "action_mean\taction_std\taction_min\taction_max\t"
+                           << "latent_mean\tlatent_std\tlatent_min\tlatent_max\t"
+                           << "base_lin_vel_x\tbase_lin_vel_y\tbase_lin_vel_z\t"
+                           << "base_ang_vel_x\tbase_ang_vel_y\tbase_ang_vel_z\t"
+                           << "non_zero_beyond_47"
+                           << std::endl;
+        file_opened = true;
+    }
+    
+    if (debug_counter % 100 == 0) {  // Print every 100 iterations to avoid spam
+        std::cout << "\n========== SIM2REAL GAP ANALYSIS (iteration " << debug_counter << ") ==========" << std::endl;
+        
+        // Compare first 47 elements (the actual observation part)
+        float mse_first_47 = 0.0f;
+        float max_diff_first_47 = 0.0f;
+        for (size_t i = 0; i < num_cur_state; i++) {
+            float diff = normalized_state_cur_[i] - normalized_critic_state_cur_[i];
+            mse_first_47 += diff * diff;
+            max_diff_first_47 = std::max(max_diff_first_47, std::abs(diff));
+        }
+        mse_first_47 /= num_cur_state;
+        
+        // Statistics for normalized observation (first 47 dims)
+        float obs_sum = 0.0f, obs_sum_sq = 0.0f, obs_min = normalized_state_cur_[0], obs_max = normalized_state_cur_[0];
+        for (size_t i = 0; i < num_cur_state; i++) {
+            float val = normalized_state_cur_[i];
+            obs_sum += val;
+            obs_sum_sq += val * val;
+            obs_min = std::min(obs_min, val);
+            obs_max = std::max(obs_max, val);
+        }
+        float obs_mean = obs_sum / num_cur_state;
+        float obs_std = std::sqrt((obs_sum_sq / num_cur_state) - (obs_mean * obs_mean));
+        
+        // Statistics for decoder output (first 47 dims)
+        float decoder_sum = 0.0f, decoder_sum_sq = 0.0f, decoder_min = normalized_critic_state_cur_[0], decoder_max = normalized_critic_state_cur_[0];
+        for (size_t i = 0; i < num_cur_state; i++) {
+            float val = normalized_critic_state_cur_[i];
+            decoder_sum += val;
+            decoder_sum_sq += val * val;
+            decoder_min = std::min(decoder_min, val);
+            decoder_max = std::max(decoder_max, val);
+        }
+        float decoder_mean = decoder_sum / num_cur_state;
+        float decoder_std = std::sqrt((decoder_sum_sq / num_cur_state) - (decoder_mean * decoder_mean));
+        
+        // Action statistics
+        float action_sum = 0.0f, action_sum_sq = 0.0f, action_min = rl_action_(0), action_max = rl_action_(0);
+        for (int i = 0; i < num_actuator_action; i++) {
+            float val = rl_action_(i);
+            action_sum += val;
+            action_sum_sq += val * val;
+            action_min = std::min(action_min, val);
+            action_max = std::max(action_max, val);
+        }
+        float action_mean = action_sum / num_actuator_action;
+        float action_std = std::sqrt((action_sum_sq / num_actuator_action) - (action_mean * action_mean));
+        
+        // Latent statistics
+        float latent_sum = 0.0f, latent_sum_sq = 0.0f, latent_min = latent_cur_[0], latent_max = latent_cur_[0];
+        for (size_t i = 0; i < num_cur_latent; i++) {
+            float val = latent_cur_[i];
+            latent_sum += val;
+            latent_sum_sq += val * val;
+            latent_min = std::min(latent_min, val);
+            latent_max = std::max(latent_max, val);
+        }
+        float latent_mean = latent_sum / num_cur_latent;
+        float latent_std = std::sqrt((latent_sum_sq / num_cur_latent) - (latent_mean * latent_mean));
+        
+        // Check if decoder output beyond index 47 is non-zero
+        int non_zero_beyond_47 = 0;
+        for (size_t i = num_cur_state; i < num_cur_critic_state; i++) {
+            if (std::abs(normalized_critic_state_cur_[i]) > 1e-6) {
+                non_zero_beyond_47++;
+            }
+        }
+        
+        // Print to console
+        std::cout << "Observation (normalized, first 47):" << std::endl;
+        std::cout << "  Mean: " << obs_mean << ", Std: " << obs_std 
+                  << ", Min: " << obs_min << ", Max: " << obs_max << std::endl;
+        std::cout << "Decoder output (first 47):" << std::endl;
+        std::cout << "  Mean: " << decoder_mean << ", Std: " << decoder_std 
+                  << ", Min: " << decoder_min << ", Max: " << decoder_max << std::endl;
+        std::cout << "Reconstruction error:" << std::endl;
+        std::cout << "  MSE: " << mse_first_47 << ", Max diff: " << max_diff_first_47 << std::endl;
+        std::cout << "Actions:" << std::endl;
+        std::cout << "  Mean: " << action_mean << ", Std: " << action_std 
+                  << ", Min: " << action_min << ", Max: " << action_max << std::endl;
+        std::cout << "Latent:" << std::endl;
+        std::cout << "  Mean: " << latent_mean << ", Std: " << latent_std 
+                  << ", Min: " << latent_min << ", Max: " << latent_max << std::endl;
+        std::cout << "Value: " << value_ << std::endl;
+        std::cout << "Non-zero decoder elements beyond 47: " << non_zero_beyond_47 << " / " << (num_cur_critic_state - num_cur_state) << std::endl;
+        std::cout << "==========================================\n" << std::endl;
+        
+        // Write to file for offline analysis
+        double current_time = rd_cc_.control_time_us_ / 1e6;
+        sim2real_debug_file << debug_counter << "\t" << current_time << "\t"
+                           << value_ << "\t"
+                           << mse_first_47 << "\t" << max_diff_first_47 << "\t"
+                           << obs_mean << "\t" << obs_std << "\t" << obs_min << "\t" << obs_max << "\t"
+                           << decoder_mean << "\t" << decoder_std << "\t" << decoder_min << "\t" << decoder_max << "\t"
+                           << action_mean << "\t" << action_std << "\t" << action_min << "\t" << action_max << "\t"
+                           << latent_mean << "\t" << latent_std << "\t" << latent_min << "\t" << latent_max << "\t"
+                           << base_lin_vel(0) << "\t" << base_lin_vel(1) << "\t" << base_lin_vel(2) << "\t"
+                           << base_ang_vel(0) << "\t" << base_ang_vel(1) << "\t" << base_ang_vel(2) << "\t"
+                           << non_zero_beyond_47
+                           << std::endl;
+    }
+    debug_counter++;
+
+    std::copy(normalized_critic_state_cur_.begin(),
+                normalized_critic_state_cur_.begin() + num_cur_critic_state,
+                input_states_buffer_c[0].begin());
+    std::copy(normalized_critic_state_cur_.begin(),
+                normalized_critic_state_cur_.begin() + num_cur_critic_state,
+                input_states_buffer_dn[0].begin());
+    // output tensor to value_
+    output_tensors_c = session_c.Run(Ort::RunOptions{nullptr}, input_names_char_c.data(), input_tensors_c.data(), input_number_c, output_names_char_c.data(), output_number_c);
+    output_tensors_dn = session_dn.Run(Ort::RunOptions{nullptr}, input_names_char_dn.data(), input_tensors_dn.data(), input_number_dn, output_names_char_dn.data(), output_number_dn);
+    value_ = output_tensors_c[0].GetTensorMutableData<float>()[0];
+    for (size_t i = 0; i < num_cur_critic_state; i++) {
+        critic_state_cur_[i] = output_tensors_dn[0].GetTensorMutableData<float>()[i];
+    }
+    std::cout << "value : " << value_ << std::endl;
     // int data_idx = 0;
     // data_idx += num_cur_state;
     // std::cout << "predicted lin vel : " << critic_state_cur_[data_idx] << "\t" << critic_state_cur_[data_idx+1] << "\t" << critic_state_cur_[data_idx+2] << std::endl;
