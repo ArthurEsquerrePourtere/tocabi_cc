@@ -5,6 +5,25 @@
 
 using namespace TOCABI;
 
+namespace
+{
+constexpr int IDX_WAIST1 = 12;
+constexpr int IDX_WAIST2 = 13;
+constexpr int IDX_UPPERBODY = 14;
+constexpr int IDX_L_SHOULDER1 = 15;
+constexpr int IDX_L_SHOULDER2 = 16;
+constexpr int IDX_L_ELBOW = 19;
+constexpr int IDX_R_SHOULDER1 = 25;
+constexpr int IDX_R_SHOULDER2 = 26;
+constexpr int IDX_R_ELBOW = 29;
+constexpr double TWO_PI = 6.28318530717958647692;
+constexpr double HALF_PI = 1.57079632679489661923;
+constexpr double AXIS_SIGN_L_SHOULDER2 = 1.0;
+constexpr double AXIS_SIGN_R_SHOULDER2 = -1.0;
+constexpr double AXIS_SIGN_L_ELBOW = 1.0;
+constexpr double AXIS_SIGN_R_ELBOW = 1.0;
+}
+
 CustomController::CustomController(RobotData &rd) : rd_(rd), //, wbc_(dc.wbc_)
         env(ORT_LOGGING_LEVEL_WARNING, "tocabi"),
         memory_info(Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault)),
@@ -49,6 +68,10 @@ CustomController::CustomController(RobotData &rd) : rd_(rd), //, wbc_(dc.wbc_)
     loadOnnX();
 
     joy_sub_ = nh_.subscribe<sensor_msgs::Joy>("joy_wh", 10, &CustomController::joyCallback, this);
+    
+    // Initialize target velocity publisher for MuJoCo visualization
+    target_vel_pub_ = nh_.advertise<std_msgs::Float32MultiArray>("/mujoco_ros_interface/target_velocity", 10);
+    ROS_INFO("Target velocity publisher initialized on topic: /mujoco_ros_interface/target_velocity");
 }
 
 void CustomController::initVariable()
@@ -128,6 +151,9 @@ void CustomController::initVariable()
     initBias();
     base_lin_vel.setZero();
     base_ang_vel.setZero();
+    command_vel_filtered_.setZero();
+    command_vel_filtered_prev_.setZero();
+    arm_swing_phase_ = 0.0;
 
 
 }
@@ -518,7 +544,7 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
     data_idx++;
 
     float prev_step_period_ = step_period_;
-    commands_(0) = 0.2;
+    commands_(0) = 0.5;
     commands_(1) = 0.0;
     commands_(2) = 0.0;
     state_cur_[data_idx] = commands_(0);
@@ -835,6 +861,20 @@ void CustomController::processEverythingElse()
             writeFile << std::endl;
             time_write_pre_ = rd_cc_.control_time_us_;
         }
+    
+    // Publish target velocities for MuJoCo visualization
+    // Format: [vel_x, vel_y, vel_z, ang_vel_x, ang_vel_y, ang_vel_z]
+    // commands_ contains [target_vel_x, target_vel_y, target_vel_yaw]
+    std_msgs::Float32MultiArray target_vel_msg;
+    target_vel_msg.data.resize(6);
+    target_vel_msg.data[0] = commands_(0);  // target_vel_x
+    target_vel_msg.data[1] = commands_(1);  // target_vel_y
+    target_vel_msg.data[2] = 0.0f;          // vel_z (not used for biped)
+    target_vel_msg.data[3] = 0.0f;          // ang_vel_x (not used)
+    target_vel_msg.data[4] = 0.0f;          // ang_vel_y (not used)
+    target_vel_msg.data[5] = commands_(2);  // target_vel_yaw
+    target_vel_pub_.publish(target_vel_msg);
+    
     time_inference_pre_ = rd_cc_.control_time_us_;
 
 }
@@ -922,9 +962,115 @@ void CustomController::computeSlow()
             }
             
         }
-        
+
+        // Low-pass filter the velocity commands to keep upper-body motion smooth
+        const Eigen::Vector3d filtered_prev = command_vel_filtered_prev_;
+        command_vel_filtered_ = command_filter_alpha_ * commands_ + (1.0 - command_filter_alpha_) * command_vel_filtered_;
+        const Eigen::Vector3d filtered_delta = command_vel_filtered_ - filtered_prev;
+        command_vel_filtered_prev_ = command_vel_filtered_;
+
+        const double vel_scale_x = std::max(0.1, static_cast<double>(vel_scale_x_));
+        const double vel_scale_y = std::max(0.05, static_cast<double>(vel_scale_y_));
+        const double yaw_scale = std::max(0.1, static_cast<double>(max_stride_yaw));
+        const double forward_norm = DyrosMath::minmax_cut(command_vel_filtered_(0) / vel_scale_x, -1.0, 1.0);
+        const double lateral_norm = DyrosMath::minmax_cut(command_vel_filtered_(1) / vel_scale_y, -1.0, 1.0);
+        const double yaw_norm = DyrosMath::minmax_cut(command_vel_filtered_(2) / yaw_scale, -1.0, 1.0);
+
+        const double command_mag = command_vel_filtered_.norm();
+        const double command_rate = filtered_delta.norm() * hz_;
+        const double motion_mag_threshold = 0.18;
+        const double motion_level = DyrosMath::minmax_cut(command_mag / motion_mag_threshold, 0.0, 1.0);
+        const double change_level = DyrosMath::minmax_cut(command_rate / command_change_threshold_, 0.0, 1.0);
+        const double engage = DyrosMath::minmax_cut(0.7 * motion_level + 0.3 * change_level, 0.0, 1.0);
+
+        const double dt = 1.0 / hz_;
+        const double swing_freq = 0.6 + 1.4 * std::abs(forward_norm);
+        arm_swing_phase_ += TWO_PI * swing_freq * dt;
+        if (arm_swing_phase_ > TWO_PI)
+        {
+            arm_swing_phase_ = std::fmod(arm_swing_phase_, TWO_PI);
+        }
+
+        double gait_phase = 0.0;
+        double gait_wave_quadrature = 0.0;
+        if (step_period_ > 1e-6)
+        {
+            gait_phase = (step_ticks_ + phase_indicator_ * step_period_) / (2.0 * step_period_);
+            gait_phase = std::max(0.0, std::min(1.0, gait_phase));
+            const double gait_angle = TWO_PI * gait_phase;
+            gait_wave_quadrature = std::sin(gait_angle + HALF_PI);
+        }
+
+        Eigen::VectorQd q_upper_target = q_init_;
+        applyUpperBodyMotion(q_upper_target,
+                     engage,
+                     forward_norm,
+                     lateral_norm,
+                     yaw_norm,
+                     gait_phase,
+                     gait_wave_quadrature);
+
+        const Eigen::VectorVQd qdot_virtual = rd_cc_.q_dot_virtual_;
+        const double cam_yaw = rd_cc_.CMM.row(5).dot(qdot_virtual);
+        const double forward_cmd = command_vel_filtered_(0);
+        const double control_time_us = rd_cc_.control_time_us_;
+        const double cam_activation_threshold = 0.05;
+        const double cam_release_threshold = 3.0;
+
+        const bool forward_motion = std::abs(forward_cmd) > cam_activation_threshold;
+        // Engage yaw CAM damping only when commanded to move forward/backward
+        if (forward_motion)
+        {
+            cam_control_active_ = true;
+            cam_quiet_timer_us_ = control_time_us;
+        }
+
+        // Project yaw centroidal momentum error into upper-body joints
+        Eigen::VectorQd cam_gradient = rd_cc_.CMM.row(5).segment(6, MODEL_DOF).transpose();
+        cam_gradient.head(num_actuator_action).setZero();
+
+        Eigen::VectorQd cam_torque = Eigen::VectorQd::Zero();
+        if (cam_control_active_)
+        {
+            const double gradient_norm = cam_gradient.segment(num_actuator_action, MODEL_DOF - num_actuator_action).squaredNorm();
+            if (gradient_norm > 1e-6)
+            {
+                const double cam_gain = 120.0;
+                cam_torque = (-cam_gain * cam_yaw / gradient_norm) * cam_gradient;
+            }
+
+            if (std::abs(cam_yaw) < cam_release_threshold)
+            {
+                if ((control_time_us - cam_quiet_timer_us_) > cam_release_duration_us_)
+                {
+                    cam_control_active_ = false;
+                }
+            }
+            else
+            {
+                cam_quiet_timer_us_ = control_time_us;
+            }
+        }
+
+        const double posture_scale = cam_control_active_ ? 0.4 : 1.0;
+        const double damping_scale = cam_control_active_ ? 0.4 : 0.8;
+        // if (upper_body_motion_){
+
+        //     for (int i = num_actuator_action; i < MODEL_DOF; i++)
+        //     {
+        //         const double posture = posture_scale * kp_(i, i) * (q_upper_target(i) - q_noise_(i));
+        //         const double damping = damping_scale * (-kv_(i, i) * q_vel_noise_(i));
+        //         // const double torque = posture + damping + cam_torque(i);
+        //         const double torque = posture + damping;
+        //         torque_rl_(i) = DyrosMath::minmax_cut(torque, -torque_bound_(i), torque_bound_(i));
+        //     }
+        // }
+        // else{
+            // }
         for (int i = num_actuator_action; i < MODEL_DOF; i++)
-            torque_rl_(i) = kp_(i,i) * (q_init_(i) - q_noise_(i)) - kv_(i,i)*q_vel_noise_(i);
+        {
+            torque_rl_(i) = kp_(i, i) * (q_init_(i) - q_noise_(i)) - kv_(i, i) * q_vel_noise_(i);
+        }
         
         if (rd_cc_.control_time_us_ < start_time_ + 0.3e6)
         {
@@ -945,6 +1091,56 @@ void CustomController::computeSlow()
     }
 
 }
+
+void CustomController::applyUpperBodyMotion(Eigen::VectorQd &q_target,
+                                            double engage,
+                                            double forward_norm,
+                                            double lateral_norm,
+                                            double yaw_norm,
+                                            double gait_phase,
+                                            double gait_wave_quadrature)
+{
+    const double lean_gain = 0.0;
+    const double lean_offset = engage * DyrosMath::minmax_cut(-lean_gain * forward_norm, -0.1, 0.1);
+    q_target(IDX_WAIST2) += lean_offset;
+
+    const double waist_yaw_gain = 0.2;
+    const double waist_yaw_offset = engage * DyrosMath::minmax_cut(waist_yaw_gain * yaw_norm, -0.3, 0.3);
+    q_target(IDX_WAIST1) += waist_yaw_offset;
+
+    const double torso_roll_gain = 0.05;
+    const double torso_roll_offset = engage * DyrosMath::minmax_cut(torso_roll_gain * lateral_norm, -0.18, 0.18);
+    q_target(IDX_UPPERBODY) += torso_roll_offset;
+
+    const double arm_swing_gain = 0.0;
+    const double arm_swing_amp = engage * DyrosMath::minmax_cut(arm_swing_gain * forward_norm, -0.5, 0.5);
+    const double swing_wave = arm_swing_amp * std::sin(arm_swing_phase_);
+    q_target(IDX_L_SHOULDER1) += swing_wave;
+    q_target(IDX_R_SHOULDER1) -= swing_wave;
+
+    const double arm_pitch_gain = -0.;
+    const double arm_pitch_offset = engage * DyrosMath::minmax_cut(arm_pitch_gain * forward_norm, -0.3, 0.3);
+    const double shake_intensity = engage * (0.08 + 0.22 * std::abs(forward_norm));
+    const double command_dir = (forward_norm >= 0.0) ? 1.0 : -1.0;
+    const double shoulder_signal = std::sin(TWO_PI * gait_phase);
+    const double shoulder_phys_left = shake_intensity * command_dir * shoulder_signal;
+    const double shoulder_phys_right = -shoulder_phys_left;
+    const double shoulder_shake_left = DyrosMath::minmax_cut(shoulder_phys_left / AXIS_SIGN_L_SHOULDER2, -0.35, 0.35);
+    const double shoulder_shake_right = DyrosMath::minmax_cut(shoulder_phys_right / AXIS_SIGN_R_SHOULDER2, -0.35, 0.35);
+    q_target(IDX_L_SHOULDER2) += arm_pitch_offset - shoulder_shake_left;
+    q_target(IDX_R_SHOULDER2) += arm_pitch_offset - shoulder_shake_right;
+
+    const double elbow_gain = -0.;
+    const double elbow_bias = engage * DyrosMath::minmax_cut(elbow_gain * forward_norm, -0.18, 0.18);
+    const double elbow_wave = engage * 0.32 * std::abs(forward_norm) * std::sin(arm_swing_phase_ + HALF_PI);
+    const double elbow_phys_left = shake_intensity * 0.6 * gait_wave_quadrature * command_dir;
+    const double elbow_phys_right = -elbow_phys_left;
+    const double elbow_shake_left = DyrosMath::minmax_cut(elbow_phys_left / AXIS_SIGN_L_ELBOW, -0.2, 0.2);
+    const double elbow_shake_right = DyrosMath::minmax_cut(elbow_phys_right / AXIS_SIGN_R_ELBOW, -0.2, 0.2);
+    q_target(IDX_L_ELBOW) += elbow_bias + elbow_wave + elbow_shake_left;
+    q_target(IDX_R_ELBOW) += -elbow_bias - elbow_wave + elbow_shake_right;
+}
+
 void CustomController::computeFast(){}
 
 void CustomController::computePlanner(){}
@@ -1004,8 +1200,8 @@ void CustomController::updateNextStepTime()
 
 void CustomController::joyCallback(const sensor_msgs::Joy::ConstPtr& joy)
 {
-    commands_(0) = DyrosMath::minmax_cut(vel_scale_x_*joy->axes[1], -0.5, 1.0);
-    commands_(1) = DyrosMath::minmax_cut(vel_scale_y_*joy->axes[0] , -0.8, 0.8);
+    commands_(0) = DyrosMath::minmax_cut(vel_scale_x_*joy->axes[1], -0.5, 0.8);
+    commands_(1) = DyrosMath::minmax_cut(vel_scale_y_*joy->axes[0] , -0.3, 0.3);
 
     if (joy->buttons[1] == 1.0 && vel_scale_x_ < 1.0 && vel_scale_y_ < 0.3){
         vel_scale_x_ += 0.03;

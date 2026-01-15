@@ -5,6 +5,7 @@
 
 #include <ros/ros.h>
 #include <sensor_msgs/Joy.h>
+#include <std_msgs/Float32MultiArray.h>
 #include "onnxruntime_cxx_api.h"
 
 class CustomController
@@ -37,6 +38,13 @@ public:
     void feedforwardPolicy();
     void processEverythingElse();
     void updateNextStepTime();
+    void applyUpperBodyMotion(Eigen::VectorQd &q_target,
+                              double engage,
+                              double forward_norm,
+                              double lateral_norm,
+                              double yaw_norm,
+                              double gait_phase,
+                              double gait_wave_quadrature);
 
     Eigen::Vector3d mat2euler(Eigen::Matrix3d mat);
 
@@ -136,6 +144,9 @@ public:
 
     void joyCallback(const sensor_msgs::Joy::ConstPtr& joy);
     ros::Subscriber joy_sub_;
+    
+    // Target velocity publisher for MuJoCo visualization
+    ros::Publisher target_vel_pub_;
 
     std::string base_path = "";
     void loadCommand(const std::string &command_file);
@@ -143,6 +154,8 @@ public:
     // BIPED WALKING PARAMETER
     float phase_indicator_ = 0;
     Eigen::Vector3d commands_;
+    Eigen::Vector3d command_vel_filtered_;
+    Eigen::Vector3d command_vel_filtered_prev_;
     double target_heading_;
     bool heading_mode_ = false;
     float step_period_ = 0.8;
@@ -160,6 +173,13 @@ private:
     Eigen::VectorQd ControlVal_;
     unsigned int walking_tick = 0;
     unsigned int walking_tick_container = 0;
+
+    bool cam_control_active_ = false;
+    double cam_quiet_timer_us_ = 0.0;
+    const double cam_release_duration_us_ = 0.15e6;
+    const double command_filter_alpha_ = 0.25;
+    const double command_change_threshold_ = 0.6;
+    double arm_swing_phase_ = 0.0;
 
     Ort::Env env;
     Ort::Session session;
