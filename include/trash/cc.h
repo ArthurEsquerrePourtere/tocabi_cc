@@ -108,7 +108,7 @@ public:
     std::ofstream evalFile;
 
     bool is_on_robot_ = false;
-    bool is_write_file_ = true;
+    bool is_write_file_ = false;
     bool random_command_mode_ = false;
     Eigen::Matrix<double, MODEL_DOF, 1> q_dot_lpf_;
 
@@ -124,18 +124,6 @@ public:
     Eigen::Matrix<double, MODEL_DOF, 1> torque_bound_;
     Eigen::Matrix<double, num_action, 2> pd_limit;
     const char ctrl_type = 'T';
-
-    // ART specific variables
-    Eigen::Matrix<double, 12, 1> torque_sum_lpf_;
-    bool use_lpf_torque_ = false;
-    double torque_cutoff_freq = 80.0;
-    Eigen::MatrixXd prev_rl_action_;
-    bool use_margin_inference_ = false;
-    bool do_inference_ = false;
-    bool use_lpf_dof_vel_ = true;
-    double dof_vel_cutoff_freq_ = 60.0;
-    bool use_lpf_ang_vel_ = false;
-    double ang_vel_cutoff_freq_ = 60.0;
 
 
     Eigen::Matrix<double, MODEL_DOF, MODEL_DOF> kp_;
@@ -154,7 +142,7 @@ public:
     std::uniform_real_distribution<float> ang_yaw_dist_;
     double action_dt_accumulate_ = 0.0;
 
-    Vector3_t base_lin_vel, base_ang_vel, base_ang_vel_lpf_;
+    Vector3_t base_lin_vel, base_ang_vel;
     double heading;
     Eigen::Vector3d euler_angle_;
 
@@ -179,11 +167,8 @@ public:
     bool heading_mode_ = false;
     float step_period_ = 0.8;
     float step_ticks_ = 0.0;
-    // float max_stride_x = 0.4;
-    // float max_stride_y = 0.12;
-    // float max_stride_yaw = 0.4;
     float max_stride_x = 0.4;
-    float max_stride_y = 0.2;
+    float max_stride_y = 0.12;
     float max_stride_yaw = 0.4;
 
     float vel_scale_x_ = 0.6;

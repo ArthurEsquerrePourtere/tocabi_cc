@@ -22,36 +22,6 @@ constexpr double AXIS_SIGN_L_SHOULDER2 = 1.0;
 constexpr double AXIS_SIGN_R_SHOULDER2 = -1.0;
 constexpr double AXIS_SIGN_L_ELBOW = 1.0;
 constexpr double AXIS_SIGN_R_ELBOW = 1.0;
-
-double smoothCommandPulse(double t, double rise_time, double hold_time, double amplitude)
-{
-    if (rise_time <= 0.0)
-    {
-        return 0.0;
-    }
-    const double total_time = 2.0 * rise_time + std::max(0.0, hold_time);
-    if (t <= 0.0 || t >= total_time)
-    {
-        return 0.0;
-    }
-
-    double phase = 0.0;
-    if (t <= rise_time)
-    {
-        phase = 0.5 * (1.0 - std::cos(M_PI * t / rise_time));
-    }
-    else if (t <= rise_time + hold_time)
-    {
-        phase = 1.0;
-    }
-    else
-    {
-        const double tau = t - rise_time - hold_time;
-        phase = 0.5 * (1.0 + std::cos(M_PI * tau / rise_time));
-    }
-    return amplitude * phase;
-}
-
 }
 
 CustomController::CustomController(RobotData &rd) : rd_(rd), //, wbc_(dc.wbc_)
@@ -73,8 +43,7 @@ CustomController::CustomController(RobotData &rd) : rd_(rd), //, wbc_(dc.wbc_)
         }
         else
         {
-            // writeFile.open("/home/rui/ubuntu-20-04/raibertGRU_ws/src/tocabi_cc/result/rui_data.csv", std::ofstream::out);
-            writeFile.open("/home/dyros/raibertGRU_ws/src/tocabi_cc/result/data.csv", std::ofstream::out);
+            writeFile.open("/home/dyros/catkin_ws/src/tocabi_cc/result/art_data.csv", std::ofstream::out);
         }
         writeFile << std::fixed << std::setprecision(8);
         
@@ -85,24 +54,20 @@ CustomController::CustomController(RobotData &rd) : rd_(rd), //, wbc_(dc.wbc_)
                   << "torque_des_0\ttorque_des_1\ttorque_des_2\ttorque_des_3\ttorque_des_4\ttorque_des_5\t"
                   << "torque_des_6\ttorque_des_7\ttorque_des_8\ttorque_des_9\ttorque_des_10\ttorque_des_11\t"
                   << "q_0\tq_1\tq_2\tq_3\tq_4\tq_5\tq_6\tq_7\tq_8\tq_9\tq_10\tq_11\t"
-                  << 
-                  "qdot_0\tqdot_1\tqdot_2\tqdot_3\tqdot_4\tqdot_5\t"
-                  << 
-                  "qdot_6\tqdot_7\tqdot_8\tqdot_9\tqdot_10\tqdot_11\t"
                   << "qdot_lpf_0\tqdot_lpf_1\tqdot_lpf_2\tqdot_lpf_3\tqdot_lpf_4\tqdot_lpf_5\t"
                   << "qdot_lpf_6\tqdot_lpf_7\tqdot_lpf_8\tqdot_lpf_9\tqdot_lpf_10\tqdot_lpf_11\t"
                   << "base_lin_vel_x\tbase_lin_vel_y\tbase_lin_vel_z\t"
                   << "base_ang_vel_x\tbase_ang_vel_y\tbase_ang_vel_z\t"
                   << "cmd_x\tcmd_y\tcmd_yaw\t"
-                //   << "rf_x\trf_y\trf_z\t"
-                //   << "lf_x\tlf_y\tlf_z\t"
-                //   << "base_height\t"
+                  << "rf_x\trf_y\trf_z\t"
+                  << "lf_x\tlf_y\tlf_z\t"
+                  << "base_height\t"
                   << std::endl;
     }
     initVariable();
     loadOnnX();
 
-    joy_sub_ = nh_.subscribe<sensor_msgs::Joy>("joy_wh", 10, &CustomController::joyCallback, this);
+    joy_sub_ = nh_.subscribe<sensor_msgs::Joy>("joy", 10, &CustomController::joyCallback, this);
     
     // Initialize target velocity publisher for MuJoCo visualization
     target_vel_pub_ = nh_.advertise<std_msgs::Float32MultiArray>("/mujoco_ros_interface/target_velocity", 10);
@@ -114,11 +79,6 @@ void CustomController::initVariable()
     // Load the path from the configuration file
 
     rl_action_.resize(num_action, 1);
-    prev_rl_action_.resize(num_action, 1);
-    // set all values of prev_rl_action_ to zero
-    for (size_t i = 0; i < num_action; i++) {
-        prev_rl_action_(i) = 0.0f;
-    }
 
     state_cur_.resize(num_cur_state, 1);
     critic_state_cur_.resize(num_cur_critic_state, 1);
@@ -136,6 +96,7 @@ void CustomController::initVariable()
                     64, 64, 64, 64, 23, 23, 10, 10,
                     10, 10,
                     64, 64, 64, 64, 23, 23, 10, 10;  
+            
                     
     q_init_ << 0.0, 0.0, -0.24, 0.6, -0.36, 0.0,
                 0.0, 0.0, -0.24, 0.6, -0.36, 0.0,
@@ -154,6 +115,7 @@ void CustomController::initVariable()
                         100.0, 100.0,
                         400.0, 1000.0, 400.0, 400.0, 400.0, 400.0, 100.0, 100.0;
     kp_.diagonal() /= 9.0;
+    // kp_.diagonal() *= 4.0;
     kv_.diagonal() << 15.0, 50.0, 20.0, 25.0, 24.0, 24.0,
                         15.0, 50.0, 20.0, 25.0, 24.0, 24.0,
                         200.0, 100.0, 100.0,
@@ -161,6 +123,7 @@ void CustomController::initVariable()
                         2.0, 2.0,
                         10.0, 28.0, 10.0, 10.0, 10.0, 10.0, 3.0, 3.0;
     kv_.diagonal() /= 3.0;
+    // kv_.diagonal() *= 2.0;
 
     pd_limit(0, 0) = -0.6;
     pd_limit(0, 1) = 0.8;
@@ -196,26 +159,17 @@ void CustomController::initVariable()
     command_vel_filtered_prev_.setZero();
     arm_swing_phase_ = 0.0;
 
-    // Initialize random command generation
-    rng_.seed(std::chrono::steady_clock::now().time_since_epoch().count());
-    lin_x_dist_ = std::uniform_real_distribution<float>(-0.5f, 0.8f);
-    lin_y_dist_ = std::uniform_real_distribution<float>(-0.4f, 0.4f); 
-    ang_yaw_dist_ = std::uniform_real_distribution<float>(-0.7f, 0.7f);
-    last_command_change_time_ = 0.0;
-
 
 }
 
 void CustomController::loadOnnX()
 {
-    string cur_path = "/home/dyros/raibertGRU_ws/src/tocabi_cc/onnx_files/";
-    string actor_path = cur_path + "actor.onnx";
-    string normalizer_path = cur_path + "normalizer.onnx";
-    string denormalizer_path = cur_path + "denormalizer.onnx";
-    string decoder_path = cur_path + "decoder.onnx";
-    string critic_path = cur_path + "critic.onnx";
-
-
+    string cur_path = "/home/dyros/raibertGRU_ws/src/tocabi_cc/";
+    string actor_path = cur_path + "onnx_files/actor.onnx";
+    string normalizer_path = cur_path + "onnx_files/normalizer.onnx";
+    string denormalizer_path = cur_path + "onnx_files/denormalizer.onnx";
+    string decoder_path = cur_path + "onnx_files/decoder.onnx";
+    string critic_path = cur_path + "onnx_files/critic.onnx";
     if (is_on_robot_)
     {
         cur_path = "/home/dyros/catkin_ws/src/tocabi_cc/";
@@ -226,7 +180,7 @@ void CustomController::loadOnnX()
         critic_path = cur_path + "onnx_files/critic.onnx";
     }
 
-    if (ctrl_mode){
+    if (ctrl_mode == 1){
         loadCommand(cur_path + "commands.txt");
     }
 
@@ -524,7 +478,7 @@ void CustomController::processNoise()
         q_noise_= rd_cc_.q_virtual_.segment(6,MODEL_DOF);
         if (time_cur_ - time_pre_ > 0.0)
         {
-            q_dot_lpf_ = DyrosMath::lpf<MODEL_DOF>(q_vel_noise_, q_dot_lpf_, 1/(time_cur_ - time_pre_), dof_vel_cutoff_freq_);
+            q_dot_lpf_ = DyrosMath::lpf<MODEL_DOF>(q_vel_noise_, q_dot_lpf_, 1/(time_cur_ - time_pre_), 4.0);
         }
         else
         {
@@ -542,7 +496,27 @@ void CustomController::processNoise()
         if (time_cur_ - time_pre_ > 0.0)
         {
             q_vel_noise_ = (q_noise_ - q_noise_pre_) / (time_cur_ - time_pre_);
-            q_dot_lpf_ = DyrosMath::lpf<MODEL_DOF>(q_vel_noise_, q_dot_lpf_, 1/(time_cur_ - time_pre_), dof_vel_cutoff_freq_);
+            // only apply the filter to the first 2 values of q_noise
+            q_dot_lpf_ = DyrosMath::lpf<MODEL_DOF>(q_vel_noise_, q_dot_lpf_, 1/(time_cur_ - time_pre_), leg_dof_vel_lpf_cutoff_freq_);
+            q_dot_lpf_higher_ = DyrosMath::lpf<MODEL_DOF>(q_vel_noise_, q_dot_lpf_higher_, 1/(time_cur_ - time_pre_), feet_dof_vel_lpf_cutoff_freq_);
+            // revert all values except first 2 values to unfiltered
+            for (int i = 4; i < 6; i++) {
+                q_dot_lpf_(i) = q_dot_lpf_higher_(i);
+            }
+            for (int i = 10; i < MODEL_DOF; i++) {
+                q_dot_lpf_(i) = q_dot_lpf_higher_(i);
+            }
+            // q_dot_lpf_ = DyrosMath::lpf<MODEL_DOF>(q_vel_noise_, q_dot_lpf_, 1/(time_cur_ - time_pre_), 20.0);
+
+            // cout << "q_noise_: " << q_noise_.transpose().head<12>() << endl;
+            // cout << "q_noise_pre_: " << q_noise_pre_.transpose().head<12>() << endl;
+            // cout << "time_cur_: " << time_cur_ << ", time_pre_: " << time_pre_ << endl;
+            // cout << "diff q: " << (q_noise_ - q_noise_pre_).transpose().head<12>() << endl;
+            // cout << "diff time: " << (time_cur_ - time_pre_) << endl;
+            // cout << "q_vel_noise_: " << q_vel_noise_.transpose().head<12>() << endl;
+            // cout << "q_dot_lpf_: " << q_dot_lpf_.transpose().head<12>() << endl;
+            base_ang_vel = (rd_cc_.q_dot_virtual_.segment(3,3));
+            base_ang_vel_lpf_ = DyrosMath::lpf<3>(base_ang_vel, base_ang_vel_lpf_, 1/(time_cur_ - time_pre_), ang_vel_lpf_cutoff_freq_);
         }
         else
         {
@@ -551,21 +525,14 @@ void CustomController::processNoise()
         }
         q_noise_pre_ = q_noise_;
     }
-    // for base ang vel lpf
-    if (time_cur_ - time_pre_ > 0.0)
-    {
-        base_ang_vel = (rd_cc_.q_dot_virtual_.segment(3,3));
-        base_ang_vel_lpf_ = DyrosMath::lpf<3>(base_ang_vel, base_ang_vel_lpf_, 1/(time_cur_ - time_pre_), ang_vel_cutoff_freq_);
-    } else
-    {
-        base_ang_vel_lpf_ = base_ang_vel_lpf_;
-    }
     time_pre_ = time_cur_;
 }
 
 
 void CustomController::processObservation() // [linvel, angvel, proj_grav, commands, dof_pos, dof_vel, actions]
 {
+
+
     int data_idx = 0;
 
     Eigen::Quaterniond q;
@@ -577,14 +544,21 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
     base_lin_vel = q.conjugate()*(rd_cc_.q_dot_virtual_.segment(0,3));
     base_ang_vel = (rd_cc_.q_dot_virtual_.segment(3,3));
 
+    // cout << "base_ang_vel: " << base_ang_vel.transpose() << endl;
+    // cout << "base_ang_vel_lpf_: " << base_ang_vel_lpf_.transpose() << endl;
+
     for (int i = 0; i < 3; i++){
-        if (use_lpf_ang_vel_){
+        if (use_lpf_vel_obs_){
             state_cur_[data_idx] = base_ang_vel_lpf_(i);
-        } else {
+        }
+        else{
             state_cur_[data_idx] = base_ang_vel(i);
         }
+        // state_cur_[data_idx] = base_ang_vel_lpf_(i);
+        // state_cur_[data_idx] = base_ang_vel(i);
         data_idx++;
     }
+    
 
     Vector3_t grav, projected_grav, forward_vec;
     grav << 0, 0, -1.;
@@ -603,41 +577,18 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
     data_idx++;
 
     float prev_step_period_ = step_period_;
-    if (random_command_mode_){
-        // Random extreme commands every 5 seconds
-        if (time_cur_ - last_command_change_time_ >= 5.0) {
-            commands_(0) = lin_x_dist_(rng_);    // [-0.5, 0.8]
-            commands_(1) = lin_y_dist_(rng_);    // [-0.4, 0.4] 
-            commands_(2) = ang_yaw_dist_(rng_);  // [-0.7, 0.7]
-            last_command_change_time_ = time_cur_;
-            std::cout << "[Random Commands] x:" << commands_(0) << " y:" << commands_(1) << " yaw:" << commands_(2) << std::endl;
-        }
+    if (ctrl_mode == 2 and !is_on_robot_){
+        string cur_path = "/home/dyros/catkin_ws/src/tocabi_cc/";
+        updateCommandFromTimeline(cur_path + "timeline.txt");
     }
-    commands_(0) = 0.35;
-    commands_(1) = 0.0;
-    commands_(2) = 0.0;
-    if (command_profile_x_enabled_)
-    {
-        const double t_x = (rd_cc_.control_time_us_ - command_profile_x_start_us_) / 1e6;
-        commands_(0) = smoothCommandPulse(t_x, command_profile_x_rise_time_, command_profile_x_hold_time_, command_profile_x_amp_);
-    }
-    if (command_profile_y_enabled_)
-    {
-        const double t_y = (rd_cc_.control_time_us_ - command_profile_y_start_us_) / 1e6;
-        commands_(1) = smoothCommandPulse(t_y, command_profile_y_rise_time_, command_profile_y_hold_time_, command_profile_y_amp_);
-    }
-    if (command_profile_yaw_enabled_)
-    {
-        const double t_yaw = (rd_cc_.control_time_us_ - command_profile_yaw_start_us_) / 1e6;
-        commands_(2) = smoothCommandPulse(t_yaw, command_profile_yaw_rise_time_, command_profile_yaw_hold_time_, command_profile_yaw_amp_);
-    }
+    // commands_(0) = 0.0;
+    // commands_(1) = 0.5;
+    // commands_(2) = 0.;
     state_cur_[data_idx] = commands_(0);
     data_idx++;
     state_cur_[data_idx] = commands_(1);
     data_idx++;
-    // if (heading_mode_) commands_(2) = DyrosMath::minmax_cut(2*heading_error_, -1., 1.);
-    if (heading_mode_ && !command_profile_yaw_enabled_)
-        commands_(2) = DyrosMath::minmax_cut(2*heading_error_, -1., 1.);
+    if (heading_mode_) commands_(2) = DyrosMath::minmax_cut(2*heading_error_, -1., 1.);
     state_cur_[data_idx] = commands_(2);
     // cout << "[DEBUG] Heading: " << commands_(2) << endl;
     data_idx++;
@@ -653,44 +604,65 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
     {
         if (is_on_robot_)
         {
-            if (use_lpf_dof_vel_){
-                state_cur_[data_idx] = q_dot_lpf_(i);
-            }
-            else
-            {
-                state_cur_[data_idx] = q_vel_noise_(i);
-            }
+            state_cur_[data_idx] = q_vel_noise_(i);
         }
         else
         {
-            // state_cur_[data_idx] = q_vel_noise_(i); //rd_cc_.q_dot_virtual_(i+6);
-            // state_cur_[data_idx] = rd_cc_.q_dot_virtual_(i+6);
-            // state_cur_[data_idx] = q_dot_lpf_(i);
-            if (use_lpf_dof_vel_){
+            if (use_lpf_vel_obs_){
                 state_cur_[data_idx] = q_dot_lpf_(i);
             }
-            else
-            {
-                state_cur_[data_idx] = q_vel_noise_(i);
+            else{
+                state_cur_[data_idx] = q_vel_noise_(i); //rd_cc_.q_dot_virtual_(i+6);
             }
+            // state_cur_[data_idx] = q_dot_lpf_(i);
+            // state_cur_[data_idx] = rd_cc_.q_dot_virtual_(i+6);
+            // if ((i < 4) || (i >= 6 && i < 10))
+            //     state_cur_[data_idx] = rd_cc_.q_dot_virtual_(i+6)/2.5;
+            // else
+            //     state_cur_[data_idx] = rd_cc_.q_dot_virtual_(i+6)/2.;
+            //clip the value to be between -5 and 5
+            // state_cur_[data_idx] = DyrosMath::minmax_cut(rd_cc_.q_dot_virtual_(i+6), -0.3, 0.3);
+            // check if abs value is less than 2
+            // if (abs(rd_cc_.q_dot_virtual_(i+6)) < 1.0) {
+            //     state_cur_[data_idx] = rd_cc_.q_dot_virtual_(i+6);
+            // }
+            // else {
+            //     if (rd_cc_.q_dot_virtual_(i+6) > 0) {
+            //         state_cur_[data_idx] = 1.0 + 0.2*(rd_cc_.q_dot_virtual_(i+6) - 1.0);
+            //     }
+            //     else {
+            //         state_cur_[data_idx] = -1.0 + 0.2*(rd_cc_.q_dot_virtual_(i+6) + 1.0);
+            //     }
+            // }
         }
         data_idx++;
     }
-    // std::cout << "step ticks : " << step_ticks_ << std::endl;
-    // std::cout << "step period : " << step_period_ << std::endl;
+    // if (value_ < 3.2){
+    //     std::cout << "phase indicator : " << phase_indicator_ << std::endl;
+    //     std::cout << "step ticks : " << step_ticks_ << std::endl;
+    //     std::cout << "step period : " << step_period_ << std::endl;
+    // }
     state_cur_[data_idx] = cos(2*M_PI*(step_ticks_+phase_indicator_*step_period_)/(2*step_period_));
-    cout << "Phase Indicator: " << state_cur_[data_idx] << endl;
-    cout << state_cur_[data_idx] << endl;
+    // if (value_ < 3.2){
+    //     cout << "cosine value: " << state_cur_[data_idx] << endl;
+    // }
     data_idx++;
     state_cur_[data_idx] = sin(2*M_PI*(step_ticks_+phase_indicator_*step_period_)/(2*step_period_));
-    cout << state_cur_[data_idx] << endl;
+    // if (value_ < 3.2){
+    //     cout << "sine value: " << state_cur_[data_idx] << endl;
+    // }
     data_idx++;
 
     for (int i = 0; i <num_actuator_action; i++) 
-    {
+    {   
+        // cout << "rl_action_(" << i << "): " << rl_action_(i) << endl;
+
         state_cur_[data_idx] = DyrosMath::minmax_cut(rl_action_(i), -1.0, 1.0);
         data_idx++;
     }
+    // cout << "torque init: " << torque_init_.transpose() << endl;
+    // cout << "rl_action_: " << rl_action_.transpose() << endl;
+    // exit(0);
     assert(data_idx == num_cur_state);
     for (int i = 0; i < num_cur_critic_state; i++){
         if (i < num_cur_state) critic_state_cur_[i] = state_cur_[i];
@@ -711,12 +683,69 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
     std::copy(h_cur_.begin(),
                 h_cur_.begin() + num_cur_h,
                 input_states_buffer[input_h0_idx_].begin());
+
+    // loop over observations and cout if something is over 10 or under -10
+    // for (int i = 0; i < num_cur_state; i++){
+    //     // cout << "Observation " << i << ": " << state_cur_[i] << endl;
+    //     if (abs(state_cur_[i]) > 3.0){
+    //         cout << "Observation " << i << " is out of bounds: " << state_cur_[i] << endl;
+    //         exit(0);
+    //     }
+        
+    // }
                 
 }
 
 void CustomController::feedforwardPolicy()
 {
+    // cout << "Commands: " << commands_.transpose() << endl;
+    // cout << "Commands to NN: " << endl;
+    // float* float_ptr = input_tensors[0].GetTensorMutableData<float>();
+    // std::cout << std::fixed << std::setprecision(3); // Keep decimal points steady
+    // for (int i = 6; i < 9; i++) {
+    //     std::cout << std::setw(8) << float_ptr[i]; 
+    // }
+    // std::cout << "\n"; 
 
+    //print observations to debug, must print each type of observations seperately for a clear debugging, for instance for loop from 0 to 2 for ang vel, 3 to 5 for projected gravity, etc.
+    // cout << "Observations to NN: " << endl;
+    // float* float_ptr = input_tensors[0].GetTensorMutableData<float>();
+    // std::cout << std::fixed << std::setprecision(5); // Keep decimal points steady
+    // cout << "Ang Vel: ";
+    // for (int i = 0; i < 3; i++) {
+    //     std::cout << std::setw(8) << float_ptr[i]; 
+    // }
+    // std::cout << "\n";
+    // cout << "Projected Gravity: ";
+    // for (int i = 3; i < 6; i++) {
+    //     std::cout << std::setw(8) << float_ptr[i]; 
+    // }
+    // std::cout << "\n";
+    // cout << "Commands: ";
+    // for (int i = 6; i < 9; i++) {
+    //     std::cout << std::setw(8) << float_ptr[i]; 
+    // }
+    // std::cout << "\n";
+    // cout << "Dof Pos: ";
+    // for (int i = 9; i < 9 + num_actuator_action; i++) {
+    //     std::cout << std::setw(8) << float_ptr[i]; 
+    // }
+    // std::cout << "\n";
+    // cout << "Dof Vel: ";
+    // for (int i = 9 + num_actuator_action; i < 9 + 2 * num_actuator_action; i++) {
+    //     std::cout << std::setw(8) << float_ptr[i]; 
+    // }
+    // std::cout << "\n";
+    // cout << "Phase Cosine & Sine: ";
+    // for (int i = 9 + 2 * num_actuator_action; i < 9 + 2 * num_actuator_action + 2; i++) {
+    //     std::cout << std::setw(8) << float_ptr[i]; 
+    // }
+    // std::cout << "\n";
+    // cout << "Previous Actions: ";
+    // for (int i = 9 + 2 * num_actuator_action + 2; i < 9 + 3 * num_actuator_action + 2; i++) {
+    //     std::cout << std::setw(8) << float_ptr[i]; 
+    // }
+    // std::cout << "\n";
 
     output_tensors = session.Run(Ort::RunOptions{nullptr}, input_names_char.data(), input_tensors.data(), input_number, output_names_char.data(), output_number);
 
@@ -731,9 +760,8 @@ void CustomController::feedforwardPolicy()
     for (size_t i = 0; i < num_actuator_action; i++) {
         rl_action_(i) = output_tensors[output_action_idx_].GetTensorMutableData<float>()[i];
     }
-    cout << "RL Action: " << rl_action_.transpose() << endl;
-    cout << "RL Action rate: " << (rl_action_ - prev_rl_action_).transpose() << endl;
-    prev_rl_action_ = rl_action_;
+    // if (value_ < 3.6)
+    //     cout << "RL Action: " << rl_action_.transpose() << endl;
 
 }
 
@@ -770,29 +798,29 @@ void CustomController::processEverythingElse()
     static bool file_opened = false;
     
     // Open file for sim2real analysis on first call
-    // if (!file_opened) {
-    //     std::string debug_file_path;
-    //     if (is_on_robot_) {
-    //         debug_file_path = "/home/dyros/catkin_ws/src/tocabi_cc/result/sim2real_debug_real.csv";
-    //     } else {
-    //         debug_file_path = "/home/rui/ubuntu-20-04/raibertGRU_ws/src/tocabi_cc/result/sim2real_debug_sim.csv";
-    //     }
-    //     sim2real_debug_file.open(debug_file_path, std::ofstream::out);
-    //     sim2real_debug_file << std::fixed << std::setprecision(6);
-    //     // Write header
-    //     sim2real_debug_file << "iteration\ttime\t"
-    //                        << "value\t"
-    //                        << "mse_obs_decoder\tmax_diff_obs_decoder\t"
-    //                        << "obs_mean\tobs_std\tobs_min\tobs_max\t"
-    //                        << "decoder_mean\tdecoder_std\tdecoder_min\tdecoder_max\t"
-    //                        << "action_mean\taction_std\taction_min\taction_max\t"
-    //                        << "latent_mean\tlatent_std\tlatent_min\tlatent_max\t"
-    //                        << "base_lin_vel_x\tbase_lin_vel_y\tbase_lin_vel_z\t"
-    //                        << "base_ang_vel_x\tbase_ang_vel_y\tbase_ang_vel_z\t"
-    //                        << "non_zero_beyond_47"
-    //                        << std::endl;
-    //     file_opened = true;
-    // }
+    if (!file_opened) {
+        std::string debug_file_path;
+        if (is_on_robot_) {
+            debug_file_path = "/home/dyros/catkin_ws/src/tocabi_cc/result/sim2real_debug_real.csv";
+        } else {
+            debug_file_path = "/home/dyros/catkin_ws/src/tocabi_cc/result/sim2real_debug_sim.csv";
+        }
+        sim2real_debug_file.open(debug_file_path, std::ofstream::out);
+        sim2real_debug_file << std::fixed << std::setprecision(6);
+        // Write header
+        sim2real_debug_file << "iteration\ttime\t"
+                           << "value\t"
+                           << "mse_obs_decoder\tmax_diff_obs_decoder\t"
+                           << "obs_mean\tobs_std\tobs_min\tobs_max\t"
+                           << "decoder_mean\tdecoder_std\tdecoder_min\tdecoder_max\t"
+                           << "action_mean\taction_std\taction_min\taction_max\t"
+                           << "latent_mean\tlatent_std\tlatent_min\tlatent_max\t"
+                           << "base_lin_vel_x\tbase_lin_vel_y\tbase_lin_vel_z\t"
+                           << "base_ang_vel_x\tbase_ang_vel_y\tbase_ang_vel_z\t"
+                           << "non_zero_beyond_47"
+                           << std::endl;
+        file_opened = true;
+    }
     
     if (debug_counter % 100 == 0) {  // Print every 100 iterations to avoid spam
         std::cout << "\n========== SIM2REAL GAP ANALYSIS (iteration " << debug_counter << ") ==========" << std::endl;
@@ -911,7 +939,11 @@ void CustomController::processEverythingElse()
     for (size_t i = 0; i < num_cur_critic_state; i++) {
         critic_state_cur_[i] = output_tensors_dn[0].GetTensorMutableData<float>()[i];
     }
-    std::cout << "value : " << value_ << std::endl;
+
+    if (debug_counter % 1 == 0) {  // Print every 100 iterations to avoid spam
+        std::cout << "Value from Critic: " << value_ << std::endl;
+    }
+    // std::cout << "value : " << value_ << std::endl;
     // int data_idx = 0;
     // data_idx += num_cur_state;
     // std::cout << "predicted lin vel : " << critic_state_cur_[data_idx] << "\t" << critic_state_cur_[data_idx+1] << "\t" << critic_state_cur_[data_idx+2] << std::endl;
@@ -944,11 +976,8 @@ void CustomController::processEverythingElse()
             
             // Joint position lower body 12 joints (indices 0-11)
             writeFile << q_noise_.segment(0, 12).transpose() << "\t";
-
-            // Joint velocity lower body 12 joints (indices 0-11)
-            writeFile << q_vel_noise_.segment(0, 12).transpose() << "\t";
             
-            // lpf Joint velocity lower body 12 joints (indices 0-11)
+            // Joint velocity lower body 12 joints (indices 0-11)
             writeFile << q_dot_lpf_.segment(0, 12).transpose() << "\t";
             
             // Base linear and angular velocity
@@ -957,17 +986,17 @@ void CustomController::processEverythingElse()
             // Target commands
             writeFile << commands_(0) << "\t" << commands_(1) << "\t" << commands_(2) << "\t";
             
-            // // Right foot global position (x, y, z)
-            // writeFile << rd_cc_.link_[Right_Foot].xpos(0) << "\t" 
-            //           << rd_cc_.link_[Right_Foot].xpos(1) << "\t" 
-            //           << rd_cc_.link_[Right_Foot].xpos(2) << "\t";
+            // Right foot global position (x, y, z)
+            writeFile << rd_cc_.link_[Right_Foot].xpos(0) << "\t" 
+                      << rd_cc_.link_[Right_Foot].xpos(1) << "\t" 
+                      << rd_cc_.link_[Right_Foot].xpos(2) << "\t";
             
-            // // Left foot global position (x, y, z)
-            // writeFile << rd_cc_.link_[Left_Foot].xpos(0) << "\t" 
-            //           << rd_cc_.link_[Left_Foot].xpos(1) << "\t" 
-            //           << rd_cc_.link_[Left_Foot].xpos(2) << "\t";
+            // Left foot global position (x, y, z)
+            writeFile << rd_cc_.link_[Left_Foot].xpos(0) << "\t" 
+                      << rd_cc_.link_[Left_Foot].xpos(1) << "\t" 
+                      << rd_cc_.link_[Left_Foot].xpos(2) << "\t";
             // Base height z
-            // writeFile << rd_cc_.link_[Pelvis].xpos(2) << "\t";
+            writeFile << rd_cc_.link_[Pelvis].xpos(2) << "\t";
             writeFile << std::endl;
             time_write_pre_ = rd_cc_.control_time_us_;
         }
@@ -986,6 +1015,7 @@ void CustomController::processEverythingElse()
     target_vel_pub_.publish(target_vel_msg);
     
     time_inference_pre_ = rd_cc_.control_time_us_;
+    
 
 }
 
@@ -997,7 +1027,34 @@ void CustomController::computeSlow()
 
     if (rd_cc_.tc_.mode == 7)
 
-    {
+    {   
+        static int count_walking_tick = 0;
+        
+        // cout << endl << endl;
+        // cout << "Custom Controller Compute Slow CC Mode 7 --> " << "walking tick " << count_walking_tick << endl;
+        // // print time
+        // cout << (rd_cc_.control_time_us_ - time_inference_pre_)/1.0e6 << endl;
+        // count_walking_tick++;
+        // if (count_walking_tick > 40)
+        //     exit(0);
+        // double decay_factor = 0.999995; // Adjust this: closer to 1.0 is slower
+        // double desired_hz_ = 125.0;
+        // static int count_down_ticks = 0; // Number of ticks to reach desired_hz_
+
+        // if (hz_ > desired_hz_) {
+        //     // Multiply instead of subtract
+        //     hz_ *= decay_factor;
+        //     count_down_ticks++;
+
+        //     // Safety floor
+        //     if (hz_ < desired_hz_) hz_ = desired_hz_;
+
+        //     del_t = 1.0 / hz_;
+
+        //     if (count_down_ticks % 100 == 0) { // Don't spam the "Wall of Print" too fast
+        //         std::cout << "Smoothly Scaling Hz: " << hz_ << " | dt: " << del_t << std::endl;
+        //     }
+        // }
 
         if (rd_cc_.tc_init)
 
@@ -1006,11 +1063,6 @@ void CustomController::computeSlow()
             //Initialize settings for Task Control! 
 
             start_time_ = rd_cc_.control_time_us_;
-
-            command_profile_x_start_us_ = rd_cc_.control_time_us_;
-            command_profile_y_start_us_ = rd_cc_.control_time_us_;
-            command_profile_yaw_start_us_ = rd_cc_.control_time_us_;
-
 
             q_noise_pre_ = q_noise_ = q_init_ = rd_cc_.q_virtual_.segment(6,MODEL_DOF);
 
@@ -1030,6 +1082,12 @@ void CustomController::computeSlow()
 
             torque_init_ = rd_cc_.torque_desired;
 
+            // use torque init to initialize rl action
+            // torque_rl_(i) = DyrosMath::minmax_cut(rl_action_(i), -1., 1.) *torque_bound_(i) ;
+            // for (int i = 0; i < num_actuator_action; i++)
+            //     rl_action_(i) = torque_init_(i) / torque_bound_(i);
+            cout << "Initial RL action from torque init: " << rl_action_.transpose() << endl;
+
             processNoise();
 
             processBias();
@@ -1038,9 +1096,15 @@ void CustomController::computeSlow()
         }
 
         processNoise();
+        // if ((rd_cc_.control_time_us_/ 1.0e6 - time_pre_) >= (1/500.)-(1/pd_hz_)/2){
+            
+        //     cout <<"Noise processing done." << endl;
+        // }
+        
+        // cout << "Time since last noise processing: " << (rd_cc_.control_time_us_/ 1.0e6 - time_pre_) << " seconds." << endl;
 
         processBias();
-
+        // cout << "Time since last inference: " << (rd_cc_.control_time_us_ - time_inference_pre_)/1.0e6 << " seconds." << endl;
         if (use_margin_inference_){
             do_inference_ = (rd_cc_.control_time_us_ - time_inference_pre_)/1.0e6 >= (1/hz_)-(1/pd_hz_)/2;
             // cout << "Using margin for inference timing: " << (1/hz_)-(1/pd_hz_)/2 << " seconds." << endl;
@@ -1049,19 +1113,28 @@ void CustomController::computeSlow()
             do_inference_ = (rd_cc_.control_time_us_ - time_inference_pre_)/1.0e6 >= (1/hz_);
         }
 
-        // if ((rd_cc_.control_time_us_ - time_inference_pre_)/1.0e6 >= 1/hz_) // 125 is the control frequency
+        // if ((rd_cc_.control_time_us_ - time_inference_pre_)/1.0e6 >= (1/hz_)-(1/pd_hz_)/2)
+
+        // if ((rd_cc_.control_time_us_ - time_inference_pre_)/1.0e6 >= (1/hz_))
+        
+        // cout << "[DEBUG] Base ang vel: " << (rd_cc_.q_dot_virtual_.segment(3,3)).transpose() << endl;
         if (do_inference_)
         {
-
+            // cout << "Running inference" << endl;
             processObservation();
 
+            if (!is_on_robot_){
+                evaluateSimPerformance();
+            }
+
             feedforwardPolicy();
+            new_policy_updated_ = true;
             
             updateNextStepTime();
 
             // action_dt_accumulate_ += DyrosMath::minmax_cut(rl_action_(num_action-1)*5/hz_, 0.0, 5/hz_);
 
-            if (value_ < 1. and value_ != 0)
+            if (value_ < 0.)
             {
                 if (stop_by_value_thres_ == false)
                 {
@@ -1072,18 +1145,22 @@ void CustomController::computeSlow()
                 }
             }
 
+            // if (value_ < 2.6 && value_ > 0.){
+            //     cout << "Low Value Warning: " << value_ << endl;
+            //     exit(0);
+            // }
+
         }
 
         for (int i = 0; i < num_actuator_action; i++){
             if (ctrl_type == 'T'){
-                torque_rl_(i) = DyrosMath::minmax_cut(rl_action_(i), -1., 1.) * torque_bound_(i) ;
+                torque_rl_(i) = DyrosMath::minmax_cut(rl_action_(i), -1., 1.) *torque_bound_(i);
             }
             if (ctrl_type == 'P'){
                 float q_std = (pd_limit(i, 1) - pd_limit(i, 0)) / 2;
                 float q_bias = (pd_limit(i, 1) + pd_limit(i, 0)) / 2;
                 torque_rl_(i) = DyrosMath::minmax_cut(kp_(i,i) * (DyrosMath::minmax_cut(rl_action_(i), -1., 1.) * q_std + q_bias - q_noise_(i)) - kv_(i,i)*q_vel_noise_(i), -torque_bound_(i), torque_bound_(i));
             }
-            
         }
 
         // Low-pass filter the velocity commands to keep upper-body motion smooth
@@ -1190,39 +1267,126 @@ void CustomController::computeSlow()
         // }
         // else{
             // }
+
+
+        
         for (int i = num_actuator_action; i < MODEL_DOF; i++)
         {
             torque_rl_(i) = kp_(i, i) * (q_init_(i) - q_noise_(i)) - kv_(i, i) * q_vel_noise_(i);
         }
         
-        if (rd_cc_.control_time_us_ < start_time_ + 0.2e6)
+        if (rd_cc_.control_time_us_ < start_time_ + 0.0e6)
         {
             for (int i = 0; i <MODEL_DOF; i++)
-                torque_spline_(i) = DyrosMath::cubic(rd_cc_.control_time_us_, start_time_, start_time_ + 0.2e6, torque_init_(i), torque_rl_(i), 0.0, 0.0);
+                torque_spline_(i) = DyrosMath::cubic(rd_cc_.control_time_us_, start_time_, start_time_ + 0.3e6, torque_init_(i), torque_rl_(i), 0.0, 0.0);
 
-            rd_.torque_desired = torque_spline_;
-            torque_sum_lpf_ = torque_spline_.head(12);    
+            rd_.torque_desired = torque_spline_;   
+            torque_sum_lpf_ = torque_spline_.head(12); 
         }
         else{
-            if (use_lpf_torque_){
+                    //LPF
+        // double torque_cutoff_freq = 40.0;
+        // torque_sum_lpf_ = 1 / (1 + 2 * M_PI * torque_cutoff_freq * del_t) * torque_sum_lpf_ //previous tick torque
+        //                 + (2 * M_PI * torque_cutoff_freq * del_t) / (1 + 2 * M_PI * torque_cutoff_freq * del_t) * torque_sum_; //updated torque
+            if (use_lpf_){
+                // cout << "use torque lpf" << endl;
+                
+                // //slowly increase cutoff frequency to 110 Hz over 10 seconds
+                // if ((rd_cc_.control_time_us_ - start_time_) < 10.0e6){
+                //     torque_cutoff_freq = 10.0 + 10.0 * ((rd_cc_.control_time_us_ - start_time_) / 1.0e6);
+                // }else{
+                //     torque_cutoff_freq = 110.0;
+                // }
+                // cout << "Torque LPF cutoff frequency: " << torque_cutoff_freq << " Hz" << endl;
                 for (int i = 0; i < 12; i++){
-                    torque_sum_lpf_(i) = 1 / (1 + 2 * M_PI * torque_cutoff_freq * (1/pd_hz_)) * torque_sum_lpf_(i) //previous tick torque
-                                    + (2 * M_PI * torque_cutoff_freq * (1/pd_hz_)) / (1 + 2 * M_PI * torque_cutoff_freq * (1/pd_hz_)) * torque_rl_(i); //updated torque
+                    torque_sum_lpf_(i) = 1 / (1 + 2 * M_PI * torque_cutoff_freq * (1/2000.0)) * torque_sum_lpf_(i) //previous tick torque
+                                    + (2 * M_PI * torque_cutoff_freq * (1/2000.0)) / (1 + 2 * M_PI * torque_cutoff_freq * (1/2000.0)) * torque_rl_(i); //updated torque
                 }
+                // rd_.torque_desired = torque_sum_lpf_;
                 rd_.torque_desired = torque_rl_;
+                // cout << "before lpf: " << torque_rl_.head(12).transpose() << endl;
                 rd_.torque_desired.head(12) = torque_sum_lpf_;
+                // cout << "after lpf: " << rd_.torque_desired.head(12).transpose() << endl;
+                
             }
             else{
-                rd_.torque_desired = torque_rl_;
+                if (use_inter_){
+                    // cout << "use interpolation" << endl;
+                    // compute interpolation based on the difference between hz_ and pd_hz_
+                    static int ticks_since_last_policy = 0;
+                    int ticks_per_update = (int)(pd_hz_ / hz_);
+                    if (new_policy_updated_) { // Boolean you set when the RL network outputs a new vector
+                        torque_rl_prev_ = rd_.torque_desired.head(12); // Store the previous torque command
+                        ticks_since_last_policy = 1;
+                        new_policy_updated_ = false;
+                    }
+                    // 3. Linear Interpolation formula: (1 - alpha) * Old + (alpha) * New
+                    double alpha = (double)ticks_since_last_policy / (double)ticks_per_update;
+                    if (alpha > 1.0) alpha = 1.0; // Safety cap
+
+                    for (int i = 0; i < 12; i++) {
+                        double interpolated_torque = (1.0 - alpha) * torque_rl_prev_(i) + alpha * torque_rl_(i);
+                        rd_.torque_desired(i) = interpolated_torque;
+                    }
+
+                    // Keep the rest of the body at the current raw command
+                    for (int i = 12; i < MODEL_DOF; i++) {
+                        rd_.torque_desired(i) = torque_rl_(i);
+                    }
+
+                    
+                    // cout << "Ticks since last policy: " << ticks_since_last_policy << "/" << ticks_per_update << ", alpha: " << alpha << endl;
+                    ticks_since_last_policy++;
+                    
+                    // rd_.torque_desired = torque_rl_;
+                } else{
+                    if (use_max_AR_){
+                        if (new_policy_updated_) { // Boolean you set when the RL network outputs a new vector
+                            torque_rl_prev_ = rd_.torque_desired.head(12);
+                            
+                        }
+                        rd_.torque_desired = torque_rl_;
+                        for (int i = 0; i < 12; i++) {
+                            double diff = (torque_rl_(i) - torque_rl_prev_(i)) * hz_;
+                            if (std::abs(diff) > max_AR_) {
+                                if (diff > 0) {
+                                    rd_.torque_desired(i) = torque_rl_prev_(i) + max_AR_ / hz_;
+                                } else {
+                                    rd_.torque_desired(i) = torque_rl_prev_(i) - max_AR_ / hz_;
+                                }
+                            }
+                        }   
+                        
+                        if (new_policy_updated_ ){
+                            new_policy_updated_ = false;
+                            // udate rl_action_ to keep input to the network consistent
+                            // for (int i = 0; i < num_actuator_action; i++){
+                            //     rl_action_(i) = rd_.torque_desired(i) / torque_bound_(i);
+                            // }
+                        }
+                        
+                        // rd_.torque_desired.head(12) = torque_max_AR_;
+
+
+                    } else{
+                        // cout << "no lpf and no interpolation" << endl;
+                        rd_.torque_desired = torque_rl_;
+                    }
+
+                }
             }
         }
 
         if (stop_by_value_thres_)
             rd_.torque_desired = kp_ * (q_stop_ - q_noise_) - kv_*q_vel_noise_;
-        // if ((rd_cc_.control_time_us_ - time_inference_pre_)/1.0e6 >= 1/hz_) // 125 is the control frequency
+
+        // if ((rd_cc_.control_time_us_ - time_inference_pre_)/1.0e6 >= 1/hz_)
+        
         if (do_inference_)
             processEverythingElse();
 
+
+        plotTorques();
 
     }
 
@@ -1325,19 +1489,107 @@ void CustomController::loadCommand(const std::string &command_file)
     file.close();
 }
 
+void CustomController::updateCommandFromTimeline(const std::string &command_file)
+{
+    static std::vector<Eigen::Vector3d> timeline;
+    static bool loaded = false;
+    static double start_walking_time = -1.0; // Captures the start of the test
+
+    // 1. Load the file (Fixed to handle comments/formatting)
+    if (!loaded) {
+        std::ifstream file(command_file);
+        if (!file) {
+            ROS_ERROR("Failed to open timeline file: %s", command_file.c_str());
+            loaded = true; return;
+        }
+        
+        std::string line;
+        while (std::getline(file, line)) {
+            // Remove comments and skip empty lines
+            size_t comment_pos = line.find('#');
+            if (comment_pos != std::string::npos) line = line.substr(0, comment_pos);
+            if (line.find_first_not_of(" \t\r\n") == std::string::npos) continue;
+
+            std::stringstream ss(line);
+            double vx, vy, vyaw;
+            if (ss >> vx >> vy >> vyaw) {
+                timeline.push_back(Eigen::Vector3d(vx, vy, vyaw));
+            }
+        }
+        file.close();
+        loaded = true;
+        ROS_INFO("Timeline loaded: %lu steps detected.", timeline.size());
+    }
+
+    // 2. Synchronize time
+    double current_time = rd_cc_.control_time_us_ / 1e6;
+
+    // Only start the clock if we are actually in walking mode
+    // (Replace 'is_walking_state' with your actual variable name, e.g., walking_tick > 0)
+    if (start_walking_time < 0) {
+        start_walking_time = current_time;
+    }
+
+    double elapsed = current_time - start_walking_time;
+    
+    // 3. Select command (every 5 seconds relative to start)
+    int index = static_cast<int>(elapsed / 5.0);
+
+    if (index < timeline.size()) {
+        commands_(0) = timeline[index](0);
+        commands_(1) = timeline[index](1);
+        commands_(2) = timeline[index](2);
+    } else {
+        // Optional: Stop the robot when timeline ends
+        commands_.setZero();
+    }
+}
+
 void CustomController::updateNextStepTime()
 {           
     step_ticks_ += del_t;
     if (step_ticks_ >= step_period_) {
         step_ticks_ = 0.;
         phase_indicator_ = 1-phase_indicator_;
-        cout << "Step! Phase indicator: " << phase_indicator_ << endl;
+        cout << endl << endl << "__________________________________" << endl;
+        cout << "Step phase switched to: " << phase_indicator_ << endl << endl;
     }
 }
 
+// void CustomController::joyCallback(const sensor_msgs::Joy::ConstPtr& joy)
+// {
+//     cout << "Joy Callback!" << endl;
+//     commands_(0) = DyrosMath::minmax_cut(vel_scale_x_*joy->axes[1], -0.5, 0.5);
+//     commands_(1) = DyrosMath::minmax_cut(vel_scale_y_*joy->axes[0] , -0.5, 0.5);
+
+//     if (joy->buttons[1] == 1.0 && vel_scale_x_ < 1.0 && vel_scale_y_ < 0.3){
+//         vel_scale_x_ += 0.03;
+//         vel_scale_y_ += 0.01;
+//         ROS_INFO("Velocity X : %f", vel_scale_x_);
+//         ROS_INFO("Velocity Y : %f", vel_scale_y_);
+//     }
+
+//     if (joy->buttons[0] == 1.0 && vel_scale_x_ > 0.1 && vel_scale_y_ > 0.03){
+//         vel_scale_x_ -= 0.03;
+//         vel_scale_y_ -= 0.01;
+//         ROS_INFO("Velocity X : %f", vel_scale_x_);
+//         ROS_INFO("Velocity Y : %f", vel_scale_y_);
+//     }
+//     if(joy->buttons[6] == 1){
+//         commands_(2) = 0.6;
+//     }
+//     if(joy->buttons[7] == 1){
+//         commands_(2) = -0.6;
+//     }
+//     if(joy->buttons[6] != 1 && joy->buttons[7] != 1){
+//         commands_(2) = 0.;
+//     }
+// }
+
 void CustomController::joyCallback(const sensor_msgs::Joy::ConstPtr& joy)
 {
-    commands_(0) = DyrosMath::minmax_cut(vel_scale_x_*joy->axes[1], -0.5, 0.5);
+    cout << "Joy Callback!" << endl;
+    commands_(0) = DyrosMath::minmax_cut(vel_scale_x_*joy->axes[1], -0.5, 1.);
     commands_(1) = DyrosMath::minmax_cut(vel_scale_y_*joy->axes[0] , -0.5, 0.5);
 
     if (joy->buttons[1] == 1.0 && vel_scale_x_ < 1.0 && vel_scale_y_ < 0.3){
@@ -1353,13 +1605,20 @@ void CustomController::joyCallback(const sensor_msgs::Joy::ConstPtr& joy)
         ROS_INFO("Velocity X : %f", vel_scale_x_);
         ROS_INFO("Velocity Y : %f", vel_scale_y_);
     }
-    if(joy->buttons[6] == 1){
-        commands_(2) = 0.6;
-    }
-    if(joy->buttons[7] == 1){
-        commands_(2) = -0.6;
-    }
-    if(joy->buttons[6] != 1 && joy->buttons[7] != 1){
+    // if(joy->buttons[6] == 1){
+    //     commands_(2) = 0.6;
+    // }
+    // if(joy->buttons[7] == 1){
+    //     commands_(2) = -0.6;
+    // }
+    // if(joy->buttons[6] != 1 && joy->buttons[7] != 1){
+    //     commands_(2) = 0.;
+    // }
+    if (joy->axes[2] < 1. && joy->axes[2] != 0.){
+        commands_(2) = DyrosMath::minmax_cut(-(joy->axes[2]-1), 0., 2.)/4.;
+    } else if (joy->axes[5] < 1. && joy->axes[5] != 0.){
+        commands_(2) = -DyrosMath::minmax_cut(-(joy->axes[5]-1), 0., 2.)/4.;
+    } else {
         commands_(2) = 0.;
     }
 }
@@ -1368,4 +1627,296 @@ void CustomController::joyCallback(const sensor_msgs::Joy::ConstPtr& joy)
 Eigen::VectorQd CustomController::getControl()
 {
     return ControlVal_;
+}
+
+void CustomController::plotTorques()
+{
+    static std::vector<Eigen::VectorXd> torque_history;
+    static std::vector<Eigen::VectorXd> torque_raw_history;
+    // plot the h_cur_ values too (first 5 values only)
+    static std::vector<Eigen::VectorXd> hcur_history; 
+    static std::vector<Eigen::VectorXd> q_dot_history_;
+    static std::vector<Eigen::VectorXd> q_dot_history_virtual_;
+    static std::vector<Eigen::VectorXd> q_dot_lpf_history_;
+    static double plot_start_time = -1.0;
+    static bool plot_finished = false;
+
+    if (plot_finished) return;
+
+    double current_time = rd_cc_.control_time_us_ / 1e6;
+    if (plot_start_time < 0) plot_start_time = current_time;
+
+    double elapsed = current_time - plot_start_time;
+    // cout << "Elapsed time for torque logging: " << elapsed << " seconds" << std::endl;
+    if (elapsed <= 10.) 
+    {
+        torque_history.push_back(rd_cc_.torque_desired.head(12));
+        if (use_lpf_){
+            torque_raw_history.push_back(torque_rl_.head(12));
+        }
+        // This creates a temporary vector containing the first 5 elements of h_cur_
+        hcur_history.push_back(Eigen::Map<Eigen::VectorXf>(h_cur_.data(), 5).cast<double>());
+
+        //
+        // print shape of q_vel_noise_, q_dot_virtual_, q_dot_lpf_
+        // cout << "q_vel_noise_ size: " << q_vel_noise_.size() << std::endl;
+        // cout << "q_dot_virtual_ size: " << rd_cc_.q_dot_virtual_.size() << std::endl;
+        // cout << "q_dot_lpf_ size: " << q_dot_lpf_.size() << std::endl;
+        // exit(0);
+        q_dot_history_.push_back(q_vel_noise_);
+        // for virtual, ignore first 6 values (base)
+        q_dot_history_virtual_.push_back(rd_cc_.q_dot_virtual_.segment(6,18));
+        q_dot_lpf_history_.push_back(q_dot_lpf_);
+
+    }
+    else 
+    {
+        // 1. Open the file
+        std::ofstream outFile("/home/dyros/catkin_ws/src/tocabi_cc/visu/torque_log.csv");
+
+        if (outFile.is_open()) {
+            // 2. Write the Header
+            outFile << "Tick";
+            for(int j=0; j<12; j++) outFile << ",Joint_" << j;
+            if (use_lpf_){
+                for(int j=0; j<12; j++) outFile << ",Joint_" << j << "_raw";
+            }
+            for(int j=0; j<12; j++) outFile << ",Qdot_Joint_" << j;
+            for(int j=0; j<12; j++) outFile << ",Qdot_LPF_Joint_" << j;
+            for(int j=0; j<12; j++) outFile << ",Qdot_Virtual_Joint_" << j;
+            outFile << "\n";
+
+            // 3. Write the Data
+            for (size_t i = 0; i < torque_history.size(); ++i) {
+                outFile << i;
+                for (int j = 0; j < 12; ++j) {
+                    outFile << "," << torque_history[i](j);
+                }
+                if (use_lpf_){
+                    for (int j = 0; j < 12; ++j) {
+                        outFile << "," << torque_raw_history[i](j);
+                    }
+                }
+                for (int j = 0; j < 12; ++j) {
+                    outFile << "," << q_dot_history_[i](j);
+                }
+                for (int j = 0; j < 12; ++j) {
+                    outFile << "," << q_dot_lpf_history_[i](j);
+                }
+                for (int j = 0; j < 12; ++j) {
+                    outFile << "," << q_dot_history_virtual_[i](j);
+                }
+                outFile << "\n";
+            }
+
+            // if(use_lpf_){
+            //     // record torque_rl_ too
+            //     outFile << "\nTick";;
+            //     for(int j=0; j<12; j++) outFile << ",Joint_" << j << "_raw";;
+            //     outFile << "\n";
+            //     for (size_t i = 0; i < torque_raw_history.size(); ++i) {
+            //         outFile << i;
+            //         for (int j = 0; j < 12; ++j) {
+            //             outFile << "," << torque_raw_history[i](j);
+            //         }
+            //         outFile << "\n";
+            //     }
+            // }
+            outFile.close();
+            std::cout << "\n[SUCCESS] Torque data saved to torque_log.csv" << std::endl;
+        } else {
+            std::cerr << "\n[ERROR] Could not open file for writing!" << std::endl;
+        }
+
+        torque_history.clear();
+        torque_history.shrink_to_fit();
+
+        std::ofstream outFile2("/home/dyros/catkin_ws/src/tocabi_cc/visu/h_log.csv");
+        if (outFile2.is_open()) {
+            // 2. Write the Header
+            outFile2 << "Tick";
+            for(int j=0; j<5; j++) outFile2 << ",Hcur_" << j;
+            outFile2 << "\n";
+
+            // 3. Write the Data
+            for (size_t i = 0; i < hcur_history.size(); ++i) {
+                outFile2 << i;
+                for (int j = 0; j < 5; ++j) {
+                    outFile2 << "," << hcur_history[i](j);
+                }
+                outFile2 << "\n";
+            }
+
+            outFile2.close();
+            std::cout << "\n[SUCCESS] Hcur data saved to h_log.csv" << std::endl;
+        } else {
+            std::cerr << "\n[ERROR] Could not open file for writing!" << std::endl;
+        }
+
+        plot_finished = true;
+        // exit(0); // Exit the program after saving the file
+    }
+}
+
+
+void CustomController::evaluateSimPerformance()
+{
+    static double sum_err_x = 0, sum_err_y = 0, sum_err_yaw = 0;
+    static int sample_count = 0;
+    static double start_time = -1.0;
+    static bool is_finished = false;
+
+    static double peak_fz = 0.0;
+    static int high_force_count = 0;
+    static double sum_sq_fz = 0.0;
+    static double sum_fz = 0.0;
+
+    static Eigen::VectorXd prev_action = Eigen::VectorXd::Zero(num_actuator_action);
+    static double peak_action_rate = 0.0;
+    static int high_act_R_count = 0;
+    static double sum_action_R = 0.0;
+    static double sum_sq_action_R = 0.0;
+    static double sum_action = 0.0;
+    static double sum_sq_action = 0.0;
+
+    static Eigen::VectorXd peak_action_R_per_joint = Eigen::VectorXd::Zero(num_actuator_action);
+    static Eigen::VectorXd sum_action_R_per_joint = Eigen::VectorXd::Zero(num_actuator_action);
+    static Eigen::VectorXd sum_sq_action_R_per_joint = Eigen::VectorXd::Zero(num_actuator_action);
+    static Eigen::VectorXd sum_action_per_joint = Eigen::VectorXd::Zero(num_actuator_action);
+    static Eigen::VectorXd sum_sq_action_per_joint = Eigen::VectorXd::Zero(num_actuator_action);
+
+    static int tick_count = 0;
+    tick_count++;
+
+
+    if (is_finished) {
+        std::cout  
+            << "Mean X: " << sum_err_x / sample_count 
+            << " | Mean Y: " << sum_err_y / sample_count 
+            << " | Mean Yaw: " << sum_err_yaw / sample_count 
+            << " | Peak Fz: " << (int)peak_fz 
+            << " | >1300: " << high_force_count 
+            << " | Mean Fz: " << (int)(sum_fz / sample_count)
+            << " | Mean Sq Fz: " << (int)(sum_sq_fz / sample_count) 
+            << " | Max action R: " << peak_action_rate 
+            << " | >375: " << high_act_R_count
+            << " | Mean Act R: " << sum_action_R / sample_count
+            << " | Mean Sq Act R: " << (int)(sum_sq_action_R / sample_count)
+            << " | Mean Act: " << sum_action / sample_count
+            << " | Mean Sq Act: " << sum_sq_action / sample_count
+            << "\r" << std::flush;
+
+            std::cout << "\n--- PER-JOINT ACTION RATE REPORT ---" << std::endl;
+            std::cout << "Joint | Max Action Rate | Mean Action Rate | Mean Sq Action Rate | Mean Action | Mean Sq Action" << std::endl;
+            for (int i = 0; i < num_actuator_action; ++i) {
+                std::cout << std::setw(5) << i << " | " 
+                        << std::setw(15) << peak_action_R_per_joint(i) << " | " 
+                        << std::setw(16) << sum_action_R_per_joint(i) / sample_count << " | "
+                        << std::setw(19) << sum_sq_action_R_per_joint(i) / sample_count << " | "
+                        << std::setw(11) << sum_action_per_joint(i) / sample_count << " | "
+                        << std::setw(14) << sum_sq_action_per_joint(i) / sample_count
+                        << std::endl;
+            }
+            cout << "\r" << std::flush;
+        return;
+    }
+
+    double current_time = rd_cc_.control_time_us_ / 1e6;
+
+    if (start_time < 0) start_time = current_time;
+
+    double elapsed = current_time - start_time;
+
+    if (elapsed <= 180.0)
+    {
+        double err_x = std::abs(commands_(0) - base_lin_vel(0));
+        double err_y = std::abs(commands_(1) - base_lin_vel(1));
+        double err_yaw = std::abs(commands_(2) - base_ang_vel(2));
+
+        sum_err_x += err_x;
+        sum_err_y += err_y;
+        sum_err_yaw += err_yaw; 
+        sample_count++;
+
+        double current_fz = std::max(std::abs(rd_cc_.LF_CF_FT(2)), std::abs(rd_cc_.RF_CF_FT(2)));
+        if (current_fz > peak_fz) peak_fz = current_fz;
+        if (current_fz > 1300.0) high_force_count++;
+        sum_fz += current_fz;
+        sum_sq_fz += (current_fz * current_fz);
+
+        // Calculate Torque Rate (N.m / s)
+        // (Action_t - Action_t-1) * frequency = Rate of Change
+        // cout << "torque rl : " << torque_rl_.transpose() << endl;
+        // cout << "prev action : " << prev_action.transpose() << endl;
+        Eigen::VectorXd torque_legs_rl_ = torque_rl_.head(12);
+        // Eigen::VectorXd torque_legs_rl_ = rd_cc_.torque_desired.head(12);
+        Eigen::VectorXd torque_rates = (torque_legs_rl_ - prev_action).cwiseAbs() * hz_;
+        
+
+        // Identify the most aggressive motor torque change
+        double max_action_rate = torque_rates.lpNorm<Eigen::Infinity>();
+        if (max_action_rate > peak_action_rate) peak_action_rate = max_action_rate;
+        // Cumulative "Control Effort" or "Jitter" metric
+        //L1 norm then L2
+        sum_action_R += torque_rates.mean();
+        sum_sq_action_R += torque_rates.squaredNorm();
+        
+        sum_action += torque_legs_rl_.cwiseAbs().mean();
+        sum_sq_action += torque_legs_rl_.squaredNorm();
+
+        sum_action_R_per_joint += torque_rates;
+        sum_sq_action_R_per_joint += torque_rates.cwiseProduct(torque_rates);
+
+        peak_action_R_per_joint = peak_action_R_per_joint.cwiseMax(torque_rates);
+
+        sum_action_per_joint += torque_legs_rl_.cwiseAbs();
+        sum_sq_action_per_joint += torque_legs_rl_.cwiseProduct(torque_legs_rl_);
+
+        // Threshold: 375 N.m/s 
+        if (max_action_rate > 375.0) high_act_R_count++;
+        prev_action = torque_legs_rl_;
+        // cout << "============ " << torque_legs_rl_.cwiseAbs().mean() << endl;
+        // cout << "torque rates : " << torque_rates.transpose() << endl;
+        // cout << "torque rl : " << torque_legs_rl_.transpose() << endl;
+        // cout << "prev action : " << prev_action.transpose() << endl;
+
+        if ((tick_count+1) % 100 == 0) {
+            // cout << " all action diff : " << action_diff.transpose() << endl;
+            // cout << " l_inf action diff : " << current_l_inf << endl;
+            // cout << " max action diff : " << action_diff.maxCoeff() << endl;
+            std::cout << std::fixed << std::setprecision(6);
+            std::cout << "[RECORDING] Time: " << elapsed 
+                      << " walking tick: " << tick_count
+                      << " | Mean X: " << sum_err_x / sample_count 
+                      << " | Mean Y: " << sum_err_y / sample_count 
+                      << " | Mean Yaw: " << sum_err_yaw / sample_count 
+                      << " | Peak Fz: " << (int)peak_fz 
+                      << " | >1300: " << high_force_count 
+                      << " | Mean Fz: " << (int)(sum_fz / sample_count)
+                      << " | Mean Sq Fz: " << (int)(sum_sq_fz / sample_count) 
+                      << " | Max action R: " << peak_action_rate 
+                      << " | >375: " << high_act_R_count
+                      << " | Mean Act R: " << sum_action_R / sample_count
+                      << " | Mean Sq Act R: " << (int)(sum_sq_action_R / sample_count)
+                      << " | Mean Act: " << sum_action / sample_count
+                      << " | Mean Sq Act: " << sum_sq_action / sample_count
+                      << " |\r" << std::flush;
+
+            std::cout << "\n--- PER-JOINT ACTION RATE REPORT ---" << std::endl;
+            std::cout << "Joint | Max Action Rate | Mean Action Rate | Mean Sq Action Rate | Mean Action | Mean Sq Action" << std::endl;
+            for (int i = 0; i < num_actuator_action; ++i) {
+                std::cout << std::setw(5) << i << " | " 
+                        << std::setw(15) << peak_action_R_per_joint(i) << " | " 
+                        << std::setw(16) << sum_action_R_per_joint(i) / sample_count << " | "
+                        << std::setw(19) << sum_sq_action_R_per_joint(i) / sample_count << " | "
+                        << std::setw(11) << sum_action_per_joint(i) / sample_count << " | "
+                        << std::setw(14) << sum_sq_action_per_joint(i) / sample_count << std::endl;
+            }
+            cout << "\r" << std::flush;
+        }
+
+    }
+    else{
+        is_finished = true; 
+    }
 }

@@ -2,7 +2,6 @@
 #include "wholebody_functions.h"
 #include <random>
 #include <cmath>
-#include <chrono>
 
 #include <ros/ros.h>
 #include <sensor_msgs/Joy.h>
@@ -17,11 +16,13 @@ public:
 
     //void taskCommandToCC(TaskCommand tc_);
 
-    const double hz_ = 125;
-    const double pd_hz_ = 2000;
+    double hz_ = 125.;
+    const double pd_hz_ = 2000.;
     double del_t = 1 / hz_;
 
     void computeSlow();
+    void evaluateSimPerformance();
+    void plotTorques();
     void computeFast();
     void computePlanner();
     void copyRobotData(RobotData &rd_l);
@@ -93,11 +94,12 @@ public:
     static const int num_action = 12;
     static const int num_actuator_action = 12;
     static const int num_cur_state = 47;
-    static const int num_cur_critic_state = 165;
+    static const int num_cur_critic_state = 166;
     static const int num_cur_latent = 24;
     static const int num_cur_h = 256;
 
     Eigen::MatrixXd rl_action_;
+    Eigen::MatrixXd obs_rl_action_;
     double value_;
 
     bool stop_by_value_thres_ = false;
@@ -108,9 +110,9 @@ public:
     std::ofstream evalFile;
 
     bool is_on_robot_ = false;
-    bool is_write_file_ = true;
-    bool random_command_mode_ = false;
+    bool is_write_file_ = false;
     Eigen::Matrix<double, MODEL_DOF, 1> q_dot_lpf_;
+    Eigen::Matrix<double, MODEL_DOF, 1> q_dot_lpf_higher_;
 
     Eigen::Matrix<double, MODEL_DOF, 1> q_init_;
     Eigen::Matrix<double, MODEL_DOF, 1> q_noise_;
@@ -121,21 +123,27 @@ public:
     Eigen::Matrix<double, MODEL_DOF, 1> torque_init_;
     Eigen::Matrix<double, MODEL_DOF, 1> torque_spline_;
     Eigen::Matrix<double, MODEL_DOF, 1> torque_rl_;
+    Eigen::Matrix<double, 12, 1> torque_sum_lpf_;
+    Eigen::Matrix<double, 12, 1> torque_rl_prev_;
+    Eigen::Matrix<double, 12, 1> torque_max_AR_;
     Eigen::Matrix<double, MODEL_DOF, 1> torque_bound_;
     Eigen::Matrix<double, num_action, 2> pd_limit;
     const char ctrl_type = 'T';
 
-    // ART specific variables
-    Eigen::Matrix<double, 12, 1> torque_sum_lpf_;
-    bool use_lpf_torque_ = false;
-    double torque_cutoff_freq = 80.0;
-    Eigen::MatrixXd prev_rl_action_;
+    bool use_lpf_ = true;
+    bool use_inter_ = false;
+    bool use_max_AR_ = false;
     bool use_margin_inference_ = false;
     bool do_inference_ = false;
-    bool use_lpf_dof_vel_ = true;
-    double dof_vel_cutoff_freq_ = 60.0;
-    bool use_lpf_ang_vel_ = false;
-    double ang_vel_cutoff_freq_ = 60.0;
+    bool new_policy_updated_ = false;
+    
+    bool use_lpf_vel_obs_ = false;
+    double ang_vel_lpf_cutoff_freq_ = 60.0;
+    double leg_dof_vel_lpf_cutoff_freq_ = 15.0;
+    double feet_dof_vel_lpf_cutoff_freq_ = 60.0;
+
+    double torque_cutoff_freq = 80.0; //for torque lpf
+    double max_AR_ = 1200;
 
 
     Eigen::Matrix<double, MODEL_DOF, MODEL_DOF> kp_;
@@ -147,11 +155,6 @@ public:
 
     double time_cur_;
     double time_pre_;
-    double last_command_change_time_;
-    std::mt19937 rng_;
-    std::uniform_real_distribution<float> lin_x_dist_;
-    std::uniform_real_distribution<float> lin_y_dist_;
-    std::uniform_real_distribution<float> ang_yaw_dist_;
     double action_dt_accumulate_ = 0.0;
 
     Vector3_t base_lin_vel, base_ang_vel, base_ang_vel_lpf_;
@@ -169,6 +172,7 @@ public:
 
     std::string base_path = "";
     void loadCommand(const std::string &command_file);
+    void updateCommandFromTimeline(const std::string &command_file);
 
     // BIPED WALKING PARAMETER
     float phase_indicator_ = 0;
@@ -179,35 +183,14 @@ public:
     bool heading_mode_ = false;
     float step_period_ = 0.8;
     float step_ticks_ = 0.0;
-    // float max_stride_x = 0.4;
-    // float max_stride_y = 0.12;
-    // float max_stride_yaw = 0.4;
     float max_stride_x = 0.4;
-    float max_stride_y = 0.2;
+    float max_stride_y = 0.12;
     float max_stride_yaw = 0.4;
 
     float vel_scale_x_ = 0.6;
-    float vel_scale_y_ = 0.4;
+    float vel_scale_y_ = 0.2;
 
-
-    // Smooth command profile (0 -> amp -> 0), per axis
-    bool command_profile_x_enabled_ = false;
-    bool command_profile_y_enabled_ = false;
-    bool command_profile_yaw_enabled_ = false;
-    double command_profile_x_amp_ = 0.8;
-    double command_profile_y_amp_ = 0.4;
-    double command_profile_yaw_amp_ = 0.7;
-    double command_profile_x_rise_time_ = 6.0;
-    double command_profile_y_rise_time_ = 6.0;
-    double command_profile_yaw_rise_time_ = 6.0;
-    double command_profile_x_hold_time_ = 4.0;
-    double command_profile_y_hold_time_ = 4.0;
-    double command_profile_yaw_hold_time_ = 4.0;
-    double command_profile_x_start_us_ = 2.0e6;
-    double command_profile_y_start_us_ = 2.0e6;
-    double command_profile_yaw_start_us_ = 2.0e6;
-
-    int ctrl_mode = 0; // 0 for joystick
+    int ctrl_mode = 2; // 0 for joystick, 1 for command file, 2 for timeline file
 
 private:
     Eigen::VectorQd ControlVal_;
@@ -228,6 +211,5 @@ private:
     Ort::Session session_d;
     Ort::Session session_c;
     Ort::MemoryInfo memory_info;
-
 
 };

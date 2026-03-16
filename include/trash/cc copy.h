@@ -2,11 +2,11 @@
 #include "wholebody_functions.h"
 #include <random>
 #include <cmath>
-#include <chrono>
+#include <unordered_map>
+#include <fstream>
 
 #include <ros/ros.h>
 #include <sensor_msgs/Joy.h>
-#include <std_msgs/Float32MultiArray.h>
 #include "onnxruntime_cxx_api.h"
 
 class CustomController
@@ -15,9 +15,7 @@ public:
     CustomController(RobotData &rd);
     Eigen::VectorQd getControl();
 
-    //void taskCommandToCC(TaskCommand tc_);
-
-    const double hz_ = 125;
+    double hz_ = 125.;
     const double pd_hz_ = 2000;
     double del_t = 1 / hz_;
 
@@ -29,23 +27,18 @@ public:
     RobotData &rd_;
     RobotData rd_cc_;
 
-    void loadOnnX();
+    void initVariablesAndLoadConfig(const std::string& config_file_path);  // Single cohesive initialization function
+    void loadOnnxModel(const std::map<std::string, std::string>& model_paths);
     void processNoise();
     void processBias();
     void initBias();
     Eigen::Matrix<double, MODEL_DOF, 1> q_bias_;
     void processObservation();
-    void initVariable();
     void feedforwardPolicy();
     void processEverythingElse();
     void updateNextStepTime();
-    void applyUpperBodyMotion(Eigen::VectorQd &q_target,
-                              double engage,
-                              double forward_norm,
-                              double lateral_norm,
-                              double yaw_norm,
-                              double gait_phase,
-                              double gait_wave_quadrature);
+
+    Ort::Session* getSession(const std::string& name);
 
     Eigen::Vector3d mat2euler(Eigen::Matrix3d mat);
 
@@ -93,7 +86,7 @@ public:
     static const int num_action = 12;
     static const int num_actuator_action = 12;
     static const int num_cur_state = 47;
-    static const int num_cur_critic_state = 165;
+    static const int num_cur_critic_state = 166;
     static const int num_cur_latent = 24;
     static const int num_cur_h = 256;
 
@@ -109,7 +102,6 @@ public:
 
     bool is_on_robot_ = false;
     bool is_write_file_ = true;
-    bool random_command_mode_ = false;
     Eigen::Matrix<double, MODEL_DOF, 1> q_dot_lpf_;
 
     Eigen::Matrix<double, MODEL_DOF, 1> q_init_;
@@ -123,19 +115,12 @@ public:
     Eigen::Matrix<double, MODEL_DOF, 1> torque_rl_;
     Eigen::Matrix<double, MODEL_DOF, 1> torque_bound_;
     Eigen::Matrix<double, num_action, 2> pd_limit;
-    const char ctrl_type = 'T';
 
-    // ART specific variables
-    Eigen::Matrix<double, 12, 1> torque_sum_lpf_;
-    bool use_lpf_torque_ = false;
-    double torque_cutoff_freq = 80.0;
-    Eigen::MatrixXd prev_rl_action_;
-    bool use_margin_inference_ = false;
-    bool do_inference_ = false;
-    bool use_lpf_dof_vel_ = true;
-    double dof_vel_cutoff_freq_ = 60.0;
-    bool use_lpf_ang_vel_ = false;
-    double ang_vel_cutoff_freq_ = 60.0;
+    // Pre-computed PD limit values for optimization (avoids repeated calculations)
+    Eigen::Matrix<double, num_action, 1> pd_limit_std_;   // (upper - lower) * 0.5
+    Eigen::Matrix<double, num_action, 1> pd_limit_bias_;  // (upper + lower) * 0.5
+
+    std::string ctrl_type_ = "T";  // Changed from const char to std::string
 
 
     Eigen::Matrix<double, MODEL_DOF, MODEL_DOF> kp_;
@@ -147,14 +132,9 @@ public:
 
     double time_cur_;
     double time_pre_;
-    double last_command_change_time_;
-    std::mt19937 rng_;
-    std::uniform_real_distribution<float> lin_x_dist_;
-    std::uniform_real_distribution<float> lin_y_dist_;
-    std::uniform_real_distribution<float> ang_yaw_dist_;
     double action_dt_accumulate_ = 0.0;
 
-    Vector3_t base_lin_vel, base_ang_vel, base_ang_vel_lpf_;
+    Vector3_t base_lin_vel, base_ang_vel;
     double heading;
     Eigen::Vector3d euler_angle_;
 
@@ -163,9 +143,6 @@ public:
 
     void joyCallback(const sensor_msgs::Joy::ConstPtr& joy);
     ros::Subscriber joy_sub_;
-    
-    // Target velocity publisher for MuJoCo visualization
-    ros::Publisher target_vel_pub_;
 
     std::string base_path = "";
     void loadCommand(const std::string &command_file);
@@ -173,61 +150,39 @@ public:
     // BIPED WALKING PARAMETER
     float phase_indicator_ = 0;
     Eigen::Vector3d commands_;
-    Eigen::Vector3d command_vel_filtered_;
-    Eigen::Vector3d command_vel_filtered_prev_;
     double target_heading_;
     bool heading_mode_ = false;
     float step_period_ = 0.8;
     float step_ticks_ = 0.0;
-    // float max_stride_x = 0.4;
-    // float max_stride_y = 0.12;
-    // float max_stride_yaw = 0.4;
     float max_stride_x = 0.4;
-    float max_stride_y = 0.2;
+    float max_stride_y = 0.12;
     float max_stride_yaw = 0.4;
 
     float vel_scale_x_ = 0.6;
-    float vel_scale_y_ = 0.4;
-
-
-    // Smooth command profile (0 -> amp -> 0), per axis
-    bool command_profile_x_enabled_ = false;
-    bool command_profile_y_enabled_ = false;
-    bool command_profile_yaw_enabled_ = false;
-    double command_profile_x_amp_ = 0.8;
-    double command_profile_y_amp_ = 0.4;
-    double command_profile_yaw_amp_ = 0.7;
-    double command_profile_x_rise_time_ = 6.0;
-    double command_profile_y_rise_time_ = 6.0;
-    double command_profile_yaw_rise_time_ = 6.0;
-    double command_profile_x_hold_time_ = 4.0;
-    double command_profile_y_hold_time_ = 4.0;
-    double command_profile_yaw_hold_time_ = 4.0;
-    double command_profile_x_start_us_ = 2.0e6;
-    double command_profile_y_start_us_ = 2.0e6;
-    double command_profile_yaw_start_us_ = 2.0e6;
+    float vel_scale_y_ = 0.2;
 
     int ctrl_mode = 0; // 0 for joystick
+
+    // Configuration
+    std::string config_file_path_;
+    std::string data_output_dir_;
+    std::string data_filename_prefix_;
+    bool data_output_enabled_ = false;
+    int save_frequency_ = 100;
+
+    // Debug configuration
+    bool debug_enabled_ = true;
+    bool debug_enabled_torque = true;
+    int debug_print_frequency_ = 100;
 
 private:
     Eigen::VectorQd ControlVal_;
     unsigned int walking_tick = 0;
     unsigned int walking_tick_container = 0;
 
-    bool cam_control_active_ = false;
-    double cam_quiet_timer_us_ = 0.0;
-    const double cam_release_duration_us_ = 0.15e6;
-    const double command_filter_alpha_ = 0.25;
-    const double command_change_threshold_ = 0.6;
-    double arm_swing_phase_ = 0.0;
-
-    Ort::Env env;
-    Ort::Session session;
-    Ort::Session session_n;
-    Ort::Session session_dn;
-    Ort::Session session_d;
-    Ort::Session session_c;
-    Ort::MemoryInfo memory_info;
+    std::unique_ptr<Ort::Env> env;
+    std::unique_ptr<Ort::MemoryInfo> memory_info;
+    std::unordered_map<std::string, std::unique_ptr<Ort::Session>> sessions_;
 
 
 };

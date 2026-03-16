@@ -1,0 +1,167 @@
+# BR RL Controller Configuration
+# Optimized configuration with better organization and validation
+
+# ONNX Model Paths (relative to package share directory's onnx/ folder)
+models:
+  actor: "onnx/temp/actor.onnx"  # Required: Main policy network
+  critic: "onnx/temp/critic.onnx"  # Optional: Value function network
+  normalizer: "onnx/temp/normalizer.onnx"  # Optional: Observation normalization
+  denormalizer: "onnx/temp/denormalizer.onnx"  # Optional: Action denormalization
+  decoder: "onnx/temp/decoder.onnx"  # Optional: Latent decoder
+  encoder: "onnx/temp/encoder.onnx"  # Optional: Observation encoder
+# Data Output Configuration
+data_output:
+  enabled: true
+  output_dir: "data"  # Relative to package share directory, or use absolute path
+  filename_prefix: "rl_data"
+  save_frequency: 100  # OPTIMIZED: Changed from 1 to 10 to reduce I/O overhead
+
+# Command Speed Configuration
+commands:
+  joy_enabled: false  # Enable joystick command input
+  target_vel_x: 0.0      # Target velocity in x direction (m/s)
+  target_vel_y: 0.0      # Target velocity in y direction (m/s)
+  target_vel_yaw: 0.0    # Target yaw velocity (rad/s)
+
+  heading: false
+  target_heading: 0.0    # Target heading angle (rad)
+
+# Controller Settings
+controller:
+  control_frequency: 1000  # Hz - Main control loop frequency
+  inference_frequency: 50.0  # Hz - Neural network inference frequency
+  action_type: "P"  # "T" for torque control, "P" for position control
+  is_on_robot: false  # true for real robot, false for simulation
+
+# Debug Settings (set enable_debug_prints to false in production for performance)
+debug:
+  enable_debug_prints: false  # OPTIMIZED: Disabled for production (30-40% performance gain)
+  enable_torque_debug_prints: false  # Enable detailed torque debug prints
+  print_frequency: 20  # Print debug info every N iterations (when enabled) - lowered for torque debugging
+
+# Model Inference Settings
+inference:
+  use_deterministic: true
+  optimization_level: 3  # OPTIMIZED: Changed to 3 (all optimizations enabled)
+
+# Controller Parameters
+params:
+  # Torque bounds for each joint (N·m) - MUST MATCH Python training torque_limits!
+  # Python training values from p73GRU_config.py
+  torque_bound: [264.0, 165.0,  69.0, 165.0,  69.0, 69.0,   # L_HipRoll, L_HipPitch, L_HipYaw, L_Knee, L_AnklePitch, L_AnkleRoll
+                 264.0, 165.0,  69.0, 165.0,  69.0, 69.0,   # R_HipRoll, R_HipPitch, R_HipYaw, R_Knee, R_AnklePitch, R_AnkleRoll
+                  69.0,  69.0,  69.0,                       # WaistYaw, WaistRoll, WaistPitch
+                 110.4, 110.4, 110.4,  45.6,  23.2, 23.2, 23.2,  # L_Arm
+                 110.4, 110.4, 110.4,  45.6,  23.2, 23.2, 23.2]  # R_Arm
+  # torque_bound: [1, 1, 1, 1, 1, 1,
+  #                1, 1, 1, 1, 1, 1,
+  #                1, 1, 1,
+  #                1, 1, 1, 1, 1, 1, 1, 1,
+  #                1, 1,
+  #                1, 1, 1, 1, 1, 1, 1, 1]
+  
+  # PD gains (diagonal values before scaling)
+  # # kp_diagonal: [2000.0, 5000.0, 4000.0, 3700.0, 3200.0, 3200.0,
+  # #               2000.0, 5000.0, 4000.0, 3700.0, 3200.0, 3200.0,
+  # #               6000.0, 10000.0, 10000.0,
+  # #               1000.0, 400.0, 400.0, 400.0, 400.0, 100.0, 100.0,
+  # #               200.0, 200.0, 200.0,
+  # #               1000.0, 400.0, 400.0, 400.0, 400.0, 100.0, 100.0]
+
+  kp_diagonal: [5000.0, 4000.0, 2000.0, 3700.0, 3200.0, 3200.0,
+                5000.0, 4000.0, 2000.0, 3700.0, 3200.0, 3200.0,
+                6000.0, 10000.0, 10000.0,
+                1000.0, 400.0, 400.0, 400.0, 400.0, 100.0, 100.0,
+                200.0, 200.0, 200.0,
+                1000.0, 400.0, 400.0, 400.0, 400.0, 100.0, 100.0]
+
+  # kp_diagonal: [5000.0, 4000.0, 2000.0, 5000.0, 4000.0, 4000.0, 
+  #        5000.0, 4000.0, 2000.0, 5000.0, 4000.0, 4000.0, 
+  #        6000.0, 10000.0, 10000.0,
+  #        500.0, 500.0, 500.0, 1500.0, 0.0, 0.0, 0.0,
+  #        500.0, 500.0, 500.0, 1500.0, 0.0, 0.0, 0.0] 
+
+  # kd_diagonal: [50.0, 20.0, 15.0, 30.0, 30.0, 30.0, 
+  #        50.0, 20.0, 15.0, 30.0, 30.0, 30.0, 
+  #        100.0, 100.0, 100.0,
+  #        40.0, 40.0, 40.0, 40.0, 0.0, 0.0, 0.0, 
+  #        40.0, 40.0, 40.0, 40.0, 0.0, 0.0, 0.0]
+  
+  # # kv_diagonal: [15.0, 50.0, 20.0, 25.0, 24.0, 24.0,
+  # #               15.0, 50.0, 20.0, 25.0, 24.0, 24.0,
+  # #               200.0, 100.0, 100.0,
+  # #               28.0, 10.0, 10.0, 10.0, 10.0, 3.0, 3.0,
+  # #               2.0, 2.0, 2.0,
+  # #               28.0, 10.0, 10.0, 10.0, 10.0, 3.0, 3.0]
+    
+  kv_diagonal: [50.0, 20.0, 15.0, 25.0, 24.0, 24.0,
+                50.0, 20.0, 15.0, 25.0, 24.0, 24.0,
+                200.0, 100.0, 100.0,
+                28.0, 10.0, 10.0, 10.0, 10.0, 3.0, 3.0,
+                10.0, 10.0, 10.0,
+                28.0, 10.0, 10.0, 10.0, 10.0, 3.0, 3.0,]
+
+
+  # kp_diagonal: [4500.0, 4500.0, 4500.0, 4500.0, 3000.0, 3000.0, 
+  #     4500.0, 4500.0, 4500.0, 4500.0, 3000.0, 3000.0, 
+  #     8500.0, 8500.0, 8500.0, 
+  #     300.0, 300.0, 300.0, 300.0, 100.0, 100.0, 100.0,
+  #     300.0, 300.0, 300.0, 300.0, 100.0, 100.0, 100.0] 
+
+  # kv_diagonal: [70.0, 70.0, 70.0, 70.0, 70.0, 70.0, 
+  #     70.0, 70.0, 70.0, 70.0, 70.0, 70.0, 
+  #     80.0, 80.0, 80.0, 
+  #     10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 
+  #     10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0]
+
+  # PD gains scale factor (kp_diagonal will be MULTIPLIED by this value)
+  kp_scale: 1.3
+  kv_scale: 1.0
+
+  # Action P
+  action_scale: [0.25, 0.25, 0.25, 0.25, 0.25, 0.25,
+                0.25, 0.25, 0.25, 0.25, 0.25, 0.25]
+  # action_scale: [
+  #               80., 80., 60., 80., 50., 50.,
+  #               80., 80., 60., 80., 50., 50.]
+
+  
+  # Initial joint positions (rad)
+  # q_init: [0.0, 0.0, -0.24, 0.6, -0.36, 0.0,
+  #          0.0, 0.0, -0.24, 0.6, -0.36, 0.0,
+  #          0.0, 0.0, 0.0,
+  #          0.3, 0.3, 1.5, -1.27, -1.0, 0.0, -1.0, 0.0,
+  #          0.0, 0.0, 0.0,
+  #          -0.3, -0.3, -1.5, 1.27, 1.0, 0.0, 1.0, 0.0]
+
+  q_init: [0.0,	 0.36,	0.0,	0.77,  -0.41,	0.0,
+           0.0, -0.36,	0.0, -0.77,	  0.41,	0.0,
+           0.0,	 0.0,	  0.0,
+           0.3,	-0.0,	0.0, -1.27,	  0.0,	0.0,	0.0,
+          -0.3,  0.0,	0.0,  1.27,	  0.0,	0.0,  0.0]
+
+  # Target initial pose for task_mode 5 (verification and smooth trajectory to init pose)
+  # NOTE: MODEL_DOF does NOT include neck joints! Total = 29 joints
+  q_init_target: [0.0,   0.36,  0.0,  0.77, -0.41,  0.0,    # Left leg (6)
+                  0.0,  -0.36,  0.0, -0.77,  0.41,  0.0,    # Right leg (6)
+                  0.0,   0.0,   0.0,                        # Waist (3)
+                  0.0,  -0.0,  0.0, -0.0,  0.0,   0.0,  0.0,  # Left arm (7)
+                 -0.0,   0.0,  0.0,  0.0,  0.0,   0.0,  0.0]  # Right arm (7)
+
+  # Duration for smooth transition to init pose in task_mode 6 (seconds)
+  init_pose_duration: 3.0
+
+  # PD limits [lower, upper] for each joint
+  pd_limit:
+    - [-0.7854,   0.4363]   # L_HipRoll
+    - [-1.5708,   2.0944]   # L_HipPitch
+    - [-0.7854,   0.7854]   # L_HipYaw
+    - [-0.0000,   2.6180]   # L_Knee
+    - [-1.0472,   0.7854]   # L_AnklePitch
+    - [-0.4189,   0.4189]   # L_AnkleRoll
+    - [-0.7854,   0.4363]   # R_HipRoll
+    - [-2.0944,   1.5708]   # R_HipPitch
+    - [-0.7854,   0.7854]   # R_HipYaw
+    - [-2.6180,   0.0000]   # R_Knee
+    - [-0.7854,   1.0472]   # R_AnklePitch
+    - [-0.4189,   0.4189]   # R_AnkleRoll
