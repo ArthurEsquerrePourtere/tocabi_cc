@@ -108,7 +108,7 @@ public:
     std::ofstream evalFile;
 
     bool is_on_robot_ = false;
-    bool is_write_file_ = true;
+    bool is_write_file_ = false;
     bool random_command_mode_ = false;
     Eigen::Matrix<double, MODEL_DOF, 1> q_dot_lpf_;
 

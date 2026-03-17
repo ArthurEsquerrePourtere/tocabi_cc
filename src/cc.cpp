@@ -93,6 +93,7 @@ CustomController::CustomController(RobotData &rd) : rd_(rd), //, wbc_(dc.wbc_)
                   << "qdot_lpf_6\tqdot_lpf_7\tqdot_lpf_8\tqdot_lpf_9\tqdot_lpf_10\tqdot_lpf_11\t"
                   << "base_lin_vel_x\tbase_lin_vel_y\tbase_lin_vel_z\t"
                   << "base_ang_vel_x\tbase_ang_vel_y\tbase_ang_vel_z\t"
+                  << "base_ang_vel_lpf_x\tbase_ang_vel_lpf_y\tbase_ang_vel_lpf_z\t"
                   << "cmd_x\tcmd_y\tcmd_yaw\t"
                 //   << "rf_x\trf_y\trf_z\t"
                 //   << "lf_x\tlf_y\tlf_z\t"
@@ -614,7 +615,7 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
         }
     }
     commands_(0) = 0.35;
-    commands_(1) = 0.0;
+    commands_(1) = 0.;
     commands_(2) = 0.0;
     if (command_profile_x_enabled_)
     {
@@ -953,6 +954,9 @@ void CustomController::processEverythingElse()
             
             // Base linear and angular velocity
             writeFile << base_lin_vel.transpose() << "\t" << base_ang_vel.transpose() << "\t";
+
+            // Base ang vel lpf
+            writeFile << base_ang_vel_lpf_.transpose() << "\t";
             
             // Target commands
             writeFile << commands_(0) << "\t" << commands_(1) << "\t" << commands_(2) << "\t";
