@@ -615,7 +615,7 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
         }
     }
     commands_(0) = 0.35;
-    commands_(1) = 0.;
+    commands_(1) = 0.0;
     commands_(2) = 0.0;
     if (command_profile_x_enabled_)
     {
