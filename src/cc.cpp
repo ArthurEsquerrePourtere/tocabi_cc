@@ -209,7 +209,7 @@ void CustomController::initVariable()
 
 void CustomController::loadOnnX()
 {
-    string cur_path = "/home/dyros/raibertGRU_ws/src/tocabi_cc/onnx_files/";
+    string cur_path = "/home/dyros/raibertGRU_ws/src/tocabi_cc/onnx_files_30/";
     string actor_path = cur_path + "actor.onnx";
     string normalizer_path = cur_path + "normalizer.onnx";
     string denormalizer_path = cur_path + "denormalizer.onnx";
@@ -219,12 +219,12 @@ void CustomController::loadOnnX()
 
     if (is_on_robot_)
     {
-        cur_path = "/home/dyros/catkin_ws/src/tocabi_cc/";
-        actor_path = cur_path + "onnx_files/actor.onnx"; 
-        normalizer_path = cur_path + "onnx_files/normalizer.onnx";
-        denormalizer_path = cur_path + "onnx_files/denormalizer.onnx";
-        decoder_path = cur_path + "onnx_files/decoder.onnx";
-        critic_path = cur_path + "onnx_files/critic.onnx";
+        cur_path = "/home/dyros/catkin_ws/src/tocabi_cc/onnx_files_30/";
+        actor_path = cur_path + "actor.onnx"; 
+        normalizer_path = cur_path + "normalizer.onnx";
+        denormalizer_path = cur_path + "denormalizer.onnx";
+        decoder_path = cur_path + "decoder.onnx";
+        critic_path = cur_path + "critic.onnx";
     }
 
     if (ctrl_mode){
@@ -578,6 +578,13 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
     base_lin_vel = q.conjugate()*(rd_cc_.q_dot_virtual_.segment(0,3));
     base_ang_vel = (rd_cc_.q_dot_virtual_.segment(3,3));
 
+    Eigen::Matrix3d R = q.toRotationMatrix();
+    double roll_deg  = atan2(R(2,1), R(2,2)) * 180.0 / M_PI;
+    double pitch_deg = atan2(-R(2,0), sqrt(R(2,1)*R(2,1) + R(2,2)*R(2,2))) * 180.0 / M_PI;
+    double yaw_deg   = atan2(R(1,0), R(0,0)) * 180.0 / M_PI;
+    std::cout << "Roll: " << roll_deg << " Pitch: " << pitch_deg << " Yaw: " << yaw_deg << std::endl;
+    std::cout << "In rad Roll : " << atan2(R(2,1), R(2,2)) << " Pitch: " << atan2(-R(2,0), sqrt(R(2,1)*R(2,1) + R(2,2)*R(2,2))) << " Yaw: " << atan2(R(1,0), R(0,0)) << std::endl;
+
     for (int i = 0; i < 3; i++){
         if (use_lpf_ang_vel_){
             state_cur_[data_idx] = base_ang_vel_lpf_(i);
@@ -680,7 +687,7 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
     // std::cout << "step ticks : " << step_ticks_ << std::endl;
     // std::cout << "step period : " << step_period_ << std::endl;
     state_cur_[data_idx] = cos(2*M_PI*(step_ticks_+phase_indicator_*step_period_)/(2*step_period_));
-    cout << "Phase Indicator: " << state_cur_[data_idx] << endl;
+    cout << "Phase Indicator: " << phase_indicator_ << endl;
     cout << state_cur_[data_idx] << endl;
     data_idx++;
     state_cur_[data_idx] = sin(2*M_PI*(step_ticks_+phase_indicator_*step_period_)/(2*step_period_));
@@ -689,7 +696,7 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
 
     for (int i = 0; i <num_actuator_action; i++) 
     {
-        state_cur_[data_idx] = DyrosMath::minmax_cut(rl_action_(i), -1.0, 1.0);
+        state_cur_[data_idx] = DyrosMath::minmax_cut(rl_action_(i), -actions_scale_, actions_scale_);
         data_idx++;
     }
     assert(data_idx == num_cur_state);
@@ -717,7 +724,53 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
 
 void CustomController::feedforwardPolicy()
 {
+    cout << "Commands: " << commands_.transpose() << endl;
+    // cout << "Commands to NN: " << endl;
+    // float* float_ptr = input_tensors[0].GetTensorMutableData<float>();
+    // std::cout << std::fixed << std::setprecision(3); // Keep decimal points steady
+    // for (int i = 6; i < 9; i++) {
+    //     std::cout << std::setw(8) << float_ptr[i]; 
+    // }
+    // std::cout << "\n"; 
 
+    cout << "Observations to NN: " << endl;
+    float* float_ptr = input_tensors[0].GetTensorMutableData<float>();
+    std::cout << std::fixed << std::setprecision(5); // Keep decimal points steady
+    cout << "Ang Vel: ";
+    for (int i = 0; i < 3; i++) {
+        std::cout << std::setw(8) << float_ptr[i]; 
+    }
+    std::cout << "\n";
+    cout << "Projected Gravity: ";
+    for (int i = 3; i < 6; i++) {
+        std::cout << std::setw(8) << float_ptr[i]; 
+    }
+    std::cout << "\n";
+    cout << "Commands: ";
+    for (int i = 6; i < 9; i++) {
+        std::cout << std::setw(8) << float_ptr[i]; 
+    }
+    std::cout << "\n";
+    cout << "Dof Pos: ";
+    for (int i = 9; i < 9 + num_actuator_action; i++) {
+        std::cout << std::setw(8) << float_ptr[i]; 
+    }
+    std::cout << "\n";
+    cout << "Dof Vel: ";
+    for (int i = 9 + num_actuator_action; i < 9 + 2 * num_actuator_action; i++) {
+        std::cout << std::setw(8) << float_ptr[i]; 
+    }
+    std::cout << "\n";
+    cout << "Phase Cosine & Sine: ";
+    for (int i = 9 + 2 * num_actuator_action; i < 9 + 2 * num_actuator_action + 2; i++) {
+        std::cout << std::setw(8) << float_ptr[i]; 
+    }
+    std::cout << "\n";
+    cout << "Previous Actions: ";
+    for (int i = 9 + 2 * num_actuator_action + 2; i < 9 + 3 * num_actuator_action + 2; i++) {
+        std::cout << std::setw(8) << float_ptr[i]; 
+    }
+    std::cout << "\n";
 
     output_tensors = session.Run(Ort::RunOptions{nullptr}, input_names_char.data(), input_tensors.data(), input_number, output_names_char.data(), output_number);
 
@@ -732,6 +785,7 @@ void CustomController::feedforwardPolicy()
     for (size_t i = 0; i < num_actuator_action; i++) {
         rl_action_(i) = output_tensors[output_action_idx_].GetTensorMutableData<float>()[i];
     }
+    cout << "prev RL Action: " << prev_rl_action_.transpose() << endl;
     cout << "RL Action: " << rl_action_.transpose() << endl;
     cout << "RL Action rate: " << (rl_action_ - prev_rl_action_).transpose() << endl;
     prev_rl_action_ = rl_action_;
@@ -996,7 +1050,7 @@ void CustomController::processEverythingElse()
 void CustomController::computeSlow()
 
 {
-
+    
     copyRobotData(rd_);
 
     if (rd_cc_.tc_.mode == 7)
@@ -1056,7 +1110,7 @@ void CustomController::computeSlow()
         // if ((rd_cc_.control_time_us_ - time_inference_pre_)/1.0e6 >= 1/hz_) // 125 is the control frequency
         if (do_inference_)
         {
-
+            cout << ":::::::::::::::: DOING INFERENCE ::::::::::::::" << std::endl;
             processObservation();
 
             feedforwardPolicy();
@@ -1080,7 +1134,7 @@ void CustomController::computeSlow()
 
         for (int i = 0; i < num_actuator_action; i++){
             if (ctrl_type == 'T'){
-                torque_rl_(i) = DyrosMath::minmax_cut(rl_action_(i), -1., 1.) * torque_bound_(i) ;
+                torque_rl_(i) = DyrosMath::minmax_cut(rl_action_(i), -actions_scale_, actions_scale_) * torque_bound_(i) / actions_scale_;
             }
             if (ctrl_type == 'P'){
                 float q_std = (pd_limit(i, 1) - pd_limit(i, 0)) / 2;
@@ -1199,10 +1253,10 @@ void CustomController::computeSlow()
             torque_rl_(i) = kp_(i, i) * (q_init_(i) - q_noise_(i)) - kv_(i, i) * q_vel_noise_(i);
         }
         
-        if (rd_cc_.control_time_us_ < start_time_ + 0.2e6)
+        if (rd_cc_.control_time_us_ < start_time_ + 0.04e6)
         {
             for (int i = 0; i <MODEL_DOF; i++)
-                torque_spline_(i) = DyrosMath::cubic(rd_cc_.control_time_us_, start_time_, start_time_ + 0.2e6, torque_init_(i), torque_rl_(i), 0.0, 0.0);
+                torque_spline_(i) = DyrosMath::cubic(rd_cc_.control_time_us_, start_time_, start_time_ + 0.04e6, torque_init_(i), torque_rl_(i), 0.0, 0.0);
 
             rd_.torque_desired = torque_spline_;
             torque_sum_lpf_ = torque_spline_.head(12);    
@@ -1210,8 +1264,14 @@ void CustomController::computeSlow()
         else{
             if (use_lpf_torque_){
                 for (int i = 0; i < 12; i++){
-                    torque_sum_lpf_(i) = 1 / (1 + 2 * M_PI * torque_cutoff_freq * (1/pd_hz_)) * torque_sum_lpf_(i) //previous tick torque
-                                    + (2 * M_PI * torque_cutoff_freq * (1/pd_hz_)) / (1 + 2 * M_PI * torque_cutoff_freq * (1/pd_hz_)) * torque_rl_(i); //updated torque
+                    if (i==4 || i==5 || i==10 || i==11){
+                        torque_sum_lpf_(i) = 1 / (1 + 2 * M_PI * torque_cutoff_freq * (1/pd_hz_)) * torque_sum_lpf_(i) //previous tick torque
+                                        + (2 * M_PI * torque_cutoff_freq * (1/pd_hz_)) / (1 + 2 * M_PI * torque_cutoff_freq * (1/pd_hz_)) * torque_rl_(i); //updated torque
+                    }
+                    else{
+                        torque_sum_lpf_(i) = torque_rl_(i);
+                    
+                    }
                 }
                 rd_.torque_desired = torque_rl_;
                 rd_.torque_desired.head(12) = torque_sum_lpf_;
