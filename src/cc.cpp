@@ -1264,14 +1264,14 @@ void CustomController::computeSlow()
         else{
             if (use_lpf_torque_){
                 for (int i = 0; i < 12; i++){
-                    if (i==4 || i==5 || i==10 || i==11){
-                        torque_sum_lpf_(i) = 1 / (1 + 2 * M_PI * torque_cutoff_freq * (1/pd_hz_)) * torque_sum_lpf_(i) //previous tick torque
-                                        + (2 * M_PI * torque_cutoff_freq * (1/pd_hz_)) / (1 + 2 * M_PI * torque_cutoff_freq * (1/pd_hz_)) * torque_rl_(i); //updated torque
-                    }
-                    else{
-                        torque_sum_lpf_(i) = torque_rl_(i);
+                    // if (i==4 || i==5 || i==10 || i==11){
+                    torque_sum_lpf_(i) = 1 / (1 + 2 * M_PI * torque_cutoff_freq * (1/pd_hz_)) * torque_sum_lpf_(i) //previous tick torque
+                                    + (2 * M_PI * torque_cutoff_freq * (1/pd_hz_)) / (1 + 2 * M_PI * torque_cutoff_freq * (1/pd_hz_)) * torque_rl_(i); //updated torque
+                    // }
+                    // else{
+                    //     torque_sum_lpf_(i) = torque_rl_(i);
                     
-                    }
+                    // }
                 }
                 rd_.torque_desired = torque_rl_;
                 rd_.torque_desired.head(12) = torque_sum_lpf_;
