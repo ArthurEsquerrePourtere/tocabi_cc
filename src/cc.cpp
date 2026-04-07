@@ -77,7 +77,25 @@ CustomController::CustomController(RobotData &rd) : rd_(rd), //, wbc_(dc.wbc_)
             writeFile.open("/home/dyros/raibertGRU_ws/src/tocabi_cc/result/data.csv", std::ofstream::out);
         }
         writeFile << std::fixed << std::setprecision(8);
-        
+
+        //prepare latent string for CSV header
+        std::string latent_header;
+        for (int i = 0; i < num_cur_latent; i++) {
+            latent_header += "latent_" + std::to_string(i) + "\t";
+        }
+
+        // prepare 47 input string for CSV header
+        std::string input_header;
+        for (int i = 0; i < num_cur_state; i++) {
+            input_header += "input_" + std::to_string(i) + "\t";
+        }
+
+        // prepare 12 action string for CSV header
+        std::string action_header;
+        for (int i = 0; i < num_action; i++) {
+            action_header += "action_" + std::to_string(i) + "\t";
+        }
+
         // Write CSV header
         writeFile << "time\t"
                   << "LF_FT_fx\tLF_FT_fy\tLF_FT_fz\tLF_FT_tx\tLF_FT_ty\tLF_FT_tz\t"
@@ -94,7 +112,11 @@ CustomController::CustomController(RobotData &rd) : rd_(rd), //, wbc_(dc.wbc_)
                   << "base_lin_vel_x\tbase_lin_vel_y\tbase_lin_vel_z\t"
                   << "base_ang_vel_x\tbase_ang_vel_y\tbase_ang_vel_z\t"
                   << "base_ang_vel_lpf_x\tbase_ang_vel_lpf_y\tbase_ang_vel_lpf_z\t"
+                  << "projected_grav_x\tprojected_grav_y\tprojected_grav_z\t"
                   << "cmd_x\tcmd_y\tcmd_yaw\t"
+                  << latent_header
+                  << input_header
+                  << action_header
                 //   << "rf_x\trf_y\trf_z\t"
                 //   << "lf_x\tlf_y\tlf_z\t"
                 //   << "base_height\t"
@@ -209,7 +231,7 @@ void CustomController::initVariable()
 
 void CustomController::loadOnnX()
 {
-    string cur_path = "/home/dyros/raibertGRU_ws/src/tocabi_cc/onnx_files_30/";
+    string cur_path = "/home/dyros/raibertGRU_ws/src/tocabi_cc/onnx_files/";
     string actor_path = cur_path + "actor.onnx";
     string normalizer_path = cur_path + "normalizer.onnx";
     string denormalizer_path = cur_path + "denormalizer.onnx";
@@ -219,7 +241,7 @@ void CustomController::loadOnnX()
 
     if (is_on_robot_)
     {
-        cur_path = "/home/dyros/catkin_ws/src/tocabi_cc/onnx_files_30/";
+        cur_path = "/home/dyros/catkin_ws/src/tocabi_cc/onnx_files/";
         actor_path = cur_path + "actor.onnx"; 
         normalizer_path = cur_path + "normalizer.onnx";
         denormalizer_path = cur_path + "denormalizer.onnx";
@@ -593,6 +615,8 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
         }
         data_idx++;
     }
+
+    
 
     Vector3_t grav, projected_grav, forward_vec;
     grav << 0, 0, -1.;
@@ -986,10 +1010,23 @@ void CustomController::processEverythingElse()
     //    std::cout << critic_state_cur_[data_idx + i] << "\t";
     // std::cout << std::endl;
 
+    
 
 
     if (is_write_file_)
     {
+            Eigen::Quaterniond q;
+            q.x() = rd_cc_.q_virtual_(3);
+            q.y() = rd_cc_.q_virtual_(4);
+            q.z() = rd_cc_.q_virtual_(5);
+            q.w() = rd_cc_.q_virtual_(MODEL_DOF_QVIRTUAL-1);  
+
+            Vector3_t grav, projected_grav, forward_vec;
+            grav << 0, 0, -1.;
+            forward_vec << 1., 0, 0;
+            projected_grav = q.conjugate()*grav;
+
+
             writeFile << (rd_cc_.control_time_us_ - time_inference_pre_)/1e6 << "\t";
             writeFile << rd_cc_.LF_CF_FT.transpose() << "\t";
             writeFile << rd_cc_.RF_CF_FT.transpose() << "\t";
@@ -1011,9 +1048,28 @@ void CustomController::processEverythingElse()
 
             // Base ang vel lpf
             writeFile << base_ang_vel_lpf_.transpose() << "\t";
+
+            // Projected gravity
+            writeFile << projected_grav.transpose() << "\t";
             
             // Target commands
             writeFile << commands_(0) << "\t" << commands_(1) << "\t" << commands_(2) << "\t";
+
+            // Latent space variables
+            for (size_t i = 0; i < num_cur_latent; i++) {
+                writeFile << latent_cur_[i] << "\t";
+            }
+
+            // save every 47 values of input_tensors
+            float* float_ptr = input_tensors[0].GetTensorMutableData<float>();
+            for (size_t i = 0; i < num_cur_state; i++) {
+                writeFile << float_ptr[i] << "\t";
+            }
+
+            // save every output tensor value
+            for (size_t i = 0; i < num_actuator_action; i++) {
+                writeFile << rl_action_(i) << "\t";
+            }
             
             // // Right foot global position (x, y, z)
             // writeFile << rd_cc_.link_[Right_Foot].xpos(0) << "\t" 
@@ -1253,10 +1309,10 @@ void CustomController::computeSlow()
             torque_rl_(i) = kp_(i, i) * (q_init_(i) - q_noise_(i)) - kv_(i, i) * q_vel_noise_(i);
         }
         
-        if (rd_cc_.control_time_us_ < start_time_ + 0.04e6)
+        if (rd_cc_.control_time_us_ < start_time_ + 0.2e6)
         {
             for (int i = 0; i <MODEL_DOF; i++)
-                torque_spline_(i) = DyrosMath::cubic(rd_cc_.control_time_us_, start_time_, start_time_ + 0.04e6, torque_init_(i), torque_rl_(i), 0.0, 0.0);
+                torque_spline_(i) = DyrosMath::cubic(rd_cc_.control_time_us_, start_time_, start_time_ + 0.2e6, torque_init_(i), torque_rl_(i), 0.0, 0.0);
 
             rd_.torque_desired = torque_spline_;
             torque_sum_lpf_ = torque_spline_.head(12);    
