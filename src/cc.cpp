@@ -664,11 +664,11 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
         state_cur_[data_idx] = projected_grav_lpf_(2);
         data_idx++;
     } else {
-        state_cur_[data_idx] = projected_grav(0)/1.0; 
+        state_cur_[data_idx] = projected_grav(0); 
         data_idx++;
-        state_cur_[data_idx] = projected_grav(1)/1.0;
+        state_cur_[data_idx] = projected_grav(1);
         data_idx++;
-        state_cur_[data_idx] = (projected_grav(2) + 1.0)/1.0 - 1.0;
+        state_cur_[data_idx] = projected_grav(2);
         data_idx++;
     }
 
