@@ -134,9 +134,12 @@ public:
     bool do_inference_ = false;
     bool use_lpf_dof_vel_ = true;
     double dof_vel_cutoff_freq_ = 60.0;
-    bool use_lpf_ang_vel_ = false;
-    double ang_vel_cutoff_freq_ = 20.0;
+    bool use_lpf_ang_vel_ = true;
+    double ang_vel_cutoff_freq_ = 60.0;
+    bool use_lpf_proj_grav_ = false;
+    double proj_grav_cutoff_freq_ = 80.0;
     double actions_scale_ = 1.0;
+    Vector3_t projected_grav_lpf_;
 
 
     Eigen::Matrix<double, MODEL_DOF, MODEL_DOF> kp_;

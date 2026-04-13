@@ -79,22 +79,28 @@ CustomController::CustomController(RobotData &rd) : rd_(rd), //, wbc_(dc.wbc_)
         writeFile << std::fixed << std::setprecision(8);
 
         //prepare latent string for CSV header
-        std::string latent_header;
-        for (int i = 0; i < num_cur_latent; i++) {
-            latent_header += "latent_" + std::to_string(i) + "\t";
-        }
+        // std::string latent_header;
+        // for (int i = 0; i < num_cur_latent; i++) {
+        //     latent_header += "latent_" + std::to_string(i) + "\t";
+        // }
 
         // prepare 47 input string for CSV header
-        std::string input_header;
-        for (int i = 0; i < num_cur_state; i++) {
-            input_header += "input_" + std::to_string(i) + "\t";
-        }
+        // std::string input_header;
+        // for (int i = 0; i < num_cur_state; i++) {
+        //     input_header += "input_" + std::to_string(i) + "\t";
+        // }
 
         // prepare 12 action string for CSV header
         std::string action_header;
         for (int i = 0; i < num_action; i++) {
             action_header += "action_" + std::to_string(i) + "\t";
         }
+
+        // prepare 256 h0 string for CSV header
+        // std::string h0_header;
+        // for (int i = 0; i < num_cur_h; i++) {
+        //     h0_header += "h0_" + std::to_string(i) + "\t";
+        // }
 
         // Write CSV header
         writeFile << "time\t"
@@ -114,9 +120,10 @@ CustomController::CustomController(RobotData &rd) : rd_(rd), //, wbc_(dc.wbc_)
                   << "base_ang_vel_lpf_x\tbase_ang_vel_lpf_y\tbase_ang_vel_lpf_z\t"
                   << "projected_grav_x\tprojected_grav_y\tprojected_grav_z\t"
                   << "cmd_x\tcmd_y\tcmd_yaw\t"
-                  << latent_header
-                  << input_header
+                //   << latent_header
+                //   << input_header
                   << action_header
+                //   << h0_header
                 //   << "rf_x\trf_y\trf_z\t"
                 //   << "lf_x\tlf_y\tlf_z\t"
                 //   << "base_height\t"
@@ -219,6 +226,8 @@ void CustomController::initVariable()
     command_vel_filtered_prev_.setZero();
     arm_swing_phase_ = 0.0;
 
+    projected_grav_lpf_ << 0, 0, -1.;
+
     // Initialize random command generation
     rng_.seed(std::chrono::steady_clock::now().time_since_epoch().count());
     lin_x_dist_ = std::uniform_real_distribution<float>(-0.5f, 0.8f);
@@ -231,7 +240,7 @@ void CustomController::initVariable()
 
 void CustomController::loadOnnX()
 {
-    string cur_path = "/home/dyros/raibertGRU_ws/src/tocabi_cc/onnx_files/";
+    string cur_path = "/home/dyros/raibertGRU_ws/src/tocabi_cc/onnx_files_ap9_2_1400/";
     string actor_path = cur_path + "actor.onnx";
     string normalizer_path = cur_path + "normalizer.onnx";
     string denormalizer_path = cur_path + "denormalizer.onnx";
@@ -241,7 +250,7 @@ void CustomController::loadOnnX()
 
     if (is_on_robot_)
     {
-        cur_path = "/home/dyros/catkin_ws/src/tocabi_cc/onnx_files/";
+        cur_path = "/home/dyros/catkin_ws/src/tocabi_cc/onnx_files_ap9_2_1400/";
         actor_path = cur_path + "actor.onnx"; 
         normalizer_path = cur_path + "normalizer.onnx";
         denormalizer_path = cur_path + "denormalizer.onnx";
@@ -583,6 +592,22 @@ void CustomController::processNoise()
     {
         base_ang_vel_lpf_ = base_ang_vel_lpf_;
     }
+
+    // for projected gravity lpf
+    Eigen::Quaterniond q;
+    q.x() = rd_cc_.q_virtual_(3);
+    q.y() = rd_cc_.q_virtual_(4);
+    q.z() = rd_cc_.q_virtual_(5);
+    q.w() = rd_cc_.q_virtual_(MODEL_DOF_QVIRTUAL-1);  
+
+    Vector3_t grav, projected_grav, forward_vec;
+    grav << 0, 0, -1.;
+    forward_vec << 1., 0, 0;
+    projected_grav = q.conjugate()*grav;
+
+    projected_grav_lpf_ = DyrosMath::lpf<3>(projected_grav, projected_grav_lpf_, 1/(time_cur_ - time_pre_), proj_grav_cutoff_freq_);
+
+
     time_pre_ = time_cur_;
 }
 
@@ -604,8 +629,8 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
     double roll_deg  = atan2(R(2,1), R(2,2)) * 180.0 / M_PI;
     double pitch_deg = atan2(-R(2,0), sqrt(R(2,1)*R(2,1) + R(2,2)*R(2,2))) * 180.0 / M_PI;
     double yaw_deg   = atan2(R(1,0), R(0,0)) * 180.0 / M_PI;
-    std::cout << "Roll: " << roll_deg << " Pitch: " << pitch_deg << " Yaw: " << yaw_deg << std::endl;
-    std::cout << "In rad Roll : " << atan2(R(2,1), R(2,2)) << " Pitch: " << atan2(-R(2,0), sqrt(R(2,1)*R(2,1) + R(2,2)*R(2,2))) << " Yaw: " << atan2(R(1,0), R(0,0)) << std::endl;
+    // std::cout << "Roll: " << roll_deg << " Pitch: " << pitch_deg << " Yaw: " << yaw_deg << std::endl;
+    // std::cout << "In rad Roll : " << atan2(R(2,1), R(2,2)) << " Pitch: " << atan2(-R(2,0), sqrt(R(2,1)*R(2,1) + R(2,2)*R(2,2))) << " Yaw: " << atan2(R(1,0), R(0,0)) << std::endl;
 
     for (int i = 0; i < 3; i++){
         if (use_lpf_ang_vel_){
@@ -627,12 +652,25 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
     double heading = atan2(forward(1), forward(0));
     double heading_error_ = target_heading_ - heading;
 
-    state_cur_[data_idx] = projected_grav(0);
-    data_idx++;
-    state_cur_[data_idx] = projected_grav(1);
-    data_idx++;
-    state_cur_[data_idx] = projected_grav(2);
-    data_idx++;
+
+    // cout << "projected grav: " << projected_grav.transpose() << endl;
+    // exit(0);
+    // state_cur_[data_idx] = projected_grav(0);
+    if (use_lpf_proj_grav_){
+        state_cur_[data_idx] = projected_grav_lpf_(0);
+        data_idx++;
+        state_cur_[data_idx] = projected_grav_lpf_(1);
+        data_idx++;
+        state_cur_[data_idx] = projected_grav_lpf_(2);
+        data_idx++;
+    } else {
+        state_cur_[data_idx] = projected_grav(0)/1.0; 
+        data_idx++;
+        state_cur_[data_idx] = projected_grav(1)/1.0;
+        data_idx++;
+        state_cur_[data_idx] = (projected_grav(2) + 1.0)/1.0 - 1.0;
+        data_idx++;
+    }
 
     float prev_step_period_ = step_period_;
     if (random_command_mode_){
@@ -711,11 +749,11 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
     // std::cout << "step ticks : " << step_ticks_ << std::endl;
     // std::cout << "step period : " << step_period_ << std::endl;
     state_cur_[data_idx] = cos(2*M_PI*(step_ticks_+phase_indicator_*step_period_)/(2*step_period_));
-    cout << "Phase Indicator: " << phase_indicator_ << endl;
-    cout << state_cur_[data_idx] << endl;
+    // cout << "Phase Indicator: " << phase_indicator_ << endl;
+    // cout << state_cur_[data_idx] << endl;
     data_idx++;
     state_cur_[data_idx] = sin(2*M_PI*(step_ticks_+phase_indicator_*step_period_)/(2*step_period_));
-    cout << state_cur_[data_idx] << endl;
+    // cout << state_cur_[data_idx] << endl;
     data_idx++;
 
     for (int i = 0; i <num_actuator_action; i++) 
@@ -748,53 +786,53 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
 
 void CustomController::feedforwardPolicy()
 {
-    cout << "Commands: " << commands_.transpose() << endl;
-    // cout << "Commands to NN: " << endl;
+    // cout << "Commands: " << commands_.transpose() << endl;
+    // // cout << "Commands to NN: " << endl;
+    // // float* float_ptr = input_tensors[0].GetTensorMutableData<float>();
+    // // std::cout << std::fixed << std::setprecision(3); // Keep decimal points steady
+    // // for (int i = 6; i < 9; i++) {
+    // //     std::cout << std::setw(8) << float_ptr[i]; 
+    // // }
+    // // std::cout << "\n"; 
+
+    // cout << "Observations to NN: " << endl;
     // float* float_ptr = input_tensors[0].GetTensorMutableData<float>();
-    // std::cout << std::fixed << std::setprecision(3); // Keep decimal points steady
+    // std::cout << std::fixed << std::setprecision(5); // Keep decimal points steady
+    // cout << "Ang Vel: ";
+    // for (int i = 0; i < 3; i++) {
+    //     std::cout << std::setw(8) << float_ptr[i]; 
+    // }
+    // std::cout << "\n";
+    // cout << "Projected Gravity: ";
+    // for (int i = 3; i < 6; i++) {
+    //     std::cout << std::setw(8) << float_ptr[i]; 
+    // }
+    // std::cout << "\n";
+    // cout << "Commands: ";
     // for (int i = 6; i < 9; i++) {
     //     std::cout << std::setw(8) << float_ptr[i]; 
     // }
-    // std::cout << "\n"; 
-
-    cout << "Observations to NN: " << endl;
-    float* float_ptr = input_tensors[0].GetTensorMutableData<float>();
-    std::cout << std::fixed << std::setprecision(5); // Keep decimal points steady
-    cout << "Ang Vel: ";
-    for (int i = 0; i < 3; i++) {
-        std::cout << std::setw(8) << float_ptr[i]; 
-    }
-    std::cout << "\n";
-    cout << "Projected Gravity: ";
-    for (int i = 3; i < 6; i++) {
-        std::cout << std::setw(8) << float_ptr[i]; 
-    }
-    std::cout << "\n";
-    cout << "Commands: ";
-    for (int i = 6; i < 9; i++) {
-        std::cout << std::setw(8) << float_ptr[i]; 
-    }
-    std::cout << "\n";
-    cout << "Dof Pos: ";
-    for (int i = 9; i < 9 + num_actuator_action; i++) {
-        std::cout << std::setw(8) << float_ptr[i]; 
-    }
-    std::cout << "\n";
-    cout << "Dof Vel: ";
-    for (int i = 9 + num_actuator_action; i < 9 + 2 * num_actuator_action; i++) {
-        std::cout << std::setw(8) << float_ptr[i]; 
-    }
-    std::cout << "\n";
-    cout << "Phase Cosine & Sine: ";
-    for (int i = 9 + 2 * num_actuator_action; i < 9 + 2 * num_actuator_action + 2; i++) {
-        std::cout << std::setw(8) << float_ptr[i]; 
-    }
-    std::cout << "\n";
-    cout << "Previous Actions: ";
-    for (int i = 9 + 2 * num_actuator_action + 2; i < 9 + 3 * num_actuator_action + 2; i++) {
-        std::cout << std::setw(8) << float_ptr[i]; 
-    }
-    std::cout << "\n";
+    // std::cout << "\n";
+    // cout << "Dof Pos: ";
+    // for (int i = 9; i < 9 + num_actuator_action; i++) {
+    //     std::cout << std::setw(8) << float_ptr[i]; 
+    // }
+    // std::cout << "\n";
+    // cout << "Dof Vel: ";
+    // for (int i = 9 + num_actuator_action; i < 9 + 2 * num_actuator_action; i++) {
+    //     std::cout << std::setw(8) << float_ptr[i]; 
+    // }
+    // std::cout << "\n";
+    // cout << "Phase Cosine & Sine: ";
+    // for (int i = 9 + 2 * num_actuator_action; i < 9 + 2 * num_actuator_action + 2; i++) {
+    //     std::cout << std::setw(8) << float_ptr[i]; 
+    // }
+    // std::cout << "\n";
+    // cout << "Previous Actions: ";
+    // for (int i = 9 + 2 * num_actuator_action + 2; i < 9 + 3 * num_actuator_action + 2; i++) {
+    //     std::cout << std::setw(8) << float_ptr[i]; 
+    // }
+    // std::cout << "\n";
 
     output_tensors = session.Run(Ort::RunOptions{nullptr}, input_names_char.data(), input_tensors.data(), input_number, output_names_char.data(), output_number);
 
@@ -809,9 +847,9 @@ void CustomController::feedforwardPolicy()
     for (size_t i = 0; i < num_actuator_action; i++) {
         rl_action_(i) = output_tensors[output_action_idx_].GetTensorMutableData<float>()[i];
     }
-    cout << "prev RL Action: " << prev_rl_action_.transpose() << endl;
-    cout << "RL Action: " << rl_action_.transpose() << endl;
-    cout << "RL Action rate: " << (rl_action_ - prev_rl_action_).transpose() << endl;
+    // cout << "prev RL Action: " << prev_rl_action_.transpose() << endl;
+    // cout << "RL Action: " << rl_action_.transpose() << endl;
+    // cout << "RL Action rate: " << (rl_action_ - prev_rl_action_).transpose() << endl;
     prev_rl_action_ = rl_action_;
 
 }
@@ -990,7 +1028,7 @@ void CustomController::processEverythingElse()
     for (size_t i = 0; i < num_cur_critic_state; i++) {
         critic_state_cur_[i] = output_tensors_dn[0].GetTensorMutableData<float>()[i];
     }
-    std::cout << "value : " << value_ << std::endl;
+    // std::cout << "value : " << value_ << std::endl;
     // int data_idx = 0;
     // data_idx += num_cur_state;
     // std::cout << "predicted lin vel : " << critic_state_cur_[data_idx] << "\t" << critic_state_cur_[data_idx+1] << "\t" << critic_state_cur_[data_idx+2] << std::endl;
@@ -1056,20 +1094,25 @@ void CustomController::processEverythingElse()
             writeFile << commands_(0) << "\t" << commands_(1) << "\t" << commands_(2) << "\t";
 
             // Latent space variables
-            for (size_t i = 0; i < num_cur_latent; i++) {
-                writeFile << latent_cur_[i] << "\t";
-            }
+            // for (size_t i = 0; i < num_cur_latent; i++) {
+            //     writeFile << latent_cur_[i] << "\t";
+            // }
 
             // save every 47 values of input_tensors
-            float* float_ptr = input_tensors[0].GetTensorMutableData<float>();
-            for (size_t i = 0; i < num_cur_state; i++) {
-                writeFile << float_ptr[i] << "\t";
-            }
+            // float* float_ptr = input_tensors[0].GetTensorMutableData<float>();
+            // for (size_t i = 0; i < num_cur_state; i++) {
+            //     writeFile << float_ptr[i] << "\t";
+            // }
 
             // save every output tensor value
             for (size_t i = 0; i < num_actuator_action; i++) {
                 writeFile << rl_action_(i) << "\t";
             }
+
+            // save evry value from hidden state output tensor
+            // for (size_t i = 0; i < num_cur_h; i++) {
+            //     writeFile << h_cur_[i] << "\t";
+            // }
             
             // // Right foot global position (x, y, z)
             // writeFile << rd_cc_.link_[Right_Foot].xpos(0) << "\t" 
@@ -1166,7 +1209,7 @@ void CustomController::computeSlow()
         // if ((rd_cc_.control_time_us_ - time_inference_pre_)/1.0e6 >= 1/hz_) // 125 is the control frequency
         if (do_inference_)
         {
-            cout << ":::::::::::::::: DOING INFERENCE ::::::::::::::" << std::endl;
+            // cout << ":::::::::::::::: DOING INFERENCE ::::::::::::::" << std::endl;
             processObservation();
 
             feedforwardPolicy();
@@ -1175,7 +1218,7 @@ void CustomController::computeSlow()
 
             // action_dt_accumulate_ += DyrosMath::minmax_cut(rl_action_(num_action-1)*5/hz_, 0.0, 5/hz_);
 
-            if (value_ < 1. and value_ != 0)
+            if (value_ < 0.1 and value_ != 0)
             {
                 if (stop_by_value_thres_ == false)
                 {
@@ -1451,7 +1494,7 @@ void CustomController::updateNextStepTime()
     if (step_ticks_ >= step_period_) {
         step_ticks_ = 0.;
         phase_indicator_ = 1-phase_indicator_;
-        cout << "Step! Phase indicator: " << phase_indicator_ << endl;
+        // cout << "Step! Phase indicator: " << phase_indicator_ << endl;
     }
 }
 
