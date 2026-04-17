@@ -240,7 +240,7 @@ void CustomController::initVariable()
 
 void CustomController::loadOnnX()
 {
-    string cur_path = "/home/dyros/raibertGRU_ws/src/tocabi_cc/onnx_files_ap9_2_1400/";
+    string cur_path = "/home/dyros/raibertGRU_ws/src/tocabi_cc/onnx_files/";
     string actor_path = cur_path + "actor.onnx";
     string normalizer_path = cur_path + "normalizer.onnx";
     string denormalizer_path = cur_path + "denormalizer.onnx";
@@ -250,7 +250,7 @@ void CustomController::loadOnnX()
 
     if (is_on_robot_)
     {
-        cur_path = "/home/dyros/catkin_ws/src/tocabi_cc/onnx_files_ap9_2_1400/";
+        cur_path = "/home/dyros/catkin_ws/src/tocabi_cc/onnx_files/";
         actor_path = cur_path + "actor.onnx"; 
         normalizer_path = cur_path + "normalizer.onnx";
         denormalizer_path = cur_path + "denormalizer.onnx";
@@ -725,6 +725,9 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
         {
             if (use_lpf_dof_vel_){
                 state_cur_[data_idx] = q_dot_lpf_(i);
+            } 
+            else if (tanh_dof_vel_){
+                state_cur_[data_idx] = tanh(q_vel_noise_(i) / tanh_dof_vel_scale_);
             }
             else
             {
@@ -738,6 +741,9 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
             // state_cur_[data_idx] = q_dot_lpf_(i);
             if (use_lpf_dof_vel_){
                 state_cur_[data_idx] = q_dot_lpf_(i);
+            } 
+            else if (tanh_dof_vel_){
+                state_cur_[data_idx] = tanh(q_vel_noise_(i) / tanh_dof_vel_scale_);
             }
             else
             {
@@ -911,8 +917,59 @@ void CustomController::processEverythingElse()
     //     file_opened = true;
     // }
     
-    if (debug_counter % 100 == 0) {  // Print every 100 iterations to avoid spam
+    if (debug_counter % 2000 == 0) {  // Print every 1000 iterations to avoid spam
         std::cout << "\n========== SIM2REAL GAP ANALYSIS (iteration " << debug_counter << ") ==========" << std::endl;
+
+// // ========== Dimension-Specific Sim2Real Gap Analysis ==========
+        
+//         // Static vectors to keep track of running totals over time
+//         static std::vector<double> obs_sum_history(num_cur_state, 0.0);
+//         static std::vector<double> obs_sq_sum_history(num_cur_state, 0.0);
+//         static long long stat_history_count = 0;
+        
+//         stat_history_count++;
+
+//         // Accumulate running history for each of the 47 individual dimensions
+//         for (size_t i = 0; i < num_cur_state; i++) {
+//             double val = normalized_state_cur_[i];
+//             obs_sum_history[i] += val;
+//             obs_sq_sum_history[i] += val * val;
+//         }
+
+//         if (debug_counter % 100 == 0) {
+//             std::cout << "\n========== DETAILED OBSERVATION STATS (Over " << stat_history_count << " steps) ==========\n";
+            
+//             // Calculate running means and standard deviations
+//             std::vector<double> obs_means(num_cur_state, 0.0);
+//             std::vector<double> obs_stds(num_cur_state, 0.0);
+            
+//             for (size_t i = 0; i < num_cur_state; i++) {
+//                 obs_means[i] = obs_sum_history[i] / stat_history_count;
+//                 double variance = (obs_sq_sum_history[i] / stat_history_count) - (obs_means[i] * obs_means[i]);
+//                 obs_stds[i] = variance > 0.0 ? std::sqrt(variance) : 0.0;
+//             }
+
+//             // Helper lambda to print categories neatly
+//             auto print_stats = [&](const std::string& name, int start_idx, int count) {
+//                 std::cout << name << ":" << std::endl;
+//                 for (int i = 0; i < count; i++) {
+//                     std::cout << "  [" << std::setw(2) << start_idx + i << "] " 
+//                               << "Mean: " << std::setw(9) << std::fixed << std::setprecision(5) << obs_means[start_idx + i]
+//                               << "  |  Std: " << std::setw(9) << obs_stds[start_idx + i] << std::endl;
+//                 }
+//             };
+
+//             // Print stats based on the exact observation layout in processObservation()
+//             print_stats("Base Angular Velocity (x, y, z)", 0, 3);
+//             print_stats("Projected Gravity (x, y, z)", 3, 3);
+//             print_stats("Commands (x, y, yaw)", 6, 3);
+//             print_stats("Joint Positions (DoF Pos)", 9, num_actuator_action);
+//             print_stats("Joint Velocities (DoF Vel)", 9 + num_actuator_action, num_actuator_action);
+//             print_stats("Phase Indicator (Cos, Sin)", 9 + 2 * num_actuator_action, 2);
+//             print_stats("Previous Actions", 9 + 2 * num_actuator_action + 2, num_actuator_action);
+            
+//             std::cout << "========================================================================\n";
+//         }
         
         // Compare first 47 elements (the actual observation part)
         float mse_first_47 = 0.0f;
@@ -1000,18 +1057,18 @@ void CustomController::processEverythingElse()
         std::cout << "==========================================\n" << std::endl;
         
         // Write to file for offline analysis
-        double current_time = rd_cc_.control_time_us_ / 1e6;
-        sim2real_debug_file << debug_counter << "\t" << current_time << "\t"
-                           << value_ << "\t"
-                           << mse_first_47 << "\t" << max_diff_first_47 << "\t"
-                           << obs_mean << "\t" << obs_std << "\t" << obs_min << "\t" << obs_max << "\t"
-                           << decoder_mean << "\t" << decoder_std << "\t" << decoder_min << "\t" << decoder_max << "\t"
-                           << action_mean << "\t" << action_std << "\t" << action_min << "\t" << action_max << "\t"
-                           << latent_mean << "\t" << latent_std << "\t" << latent_min << "\t" << latent_max << "\t"
-                           << base_lin_vel(0) << "\t" << base_lin_vel(1) << "\t" << base_lin_vel(2) << "\t"
-                           << base_ang_vel(0) << "\t" << base_ang_vel(1) << "\t" << base_ang_vel(2) << "\t"
-                           << non_zero_beyond_47
-                           << std::endl;
+        // double current_time = rd_cc_.control_time_us_ / 1e6;
+        // sim2real_debug_file << debug_counter << "\t" << current_time << "\t"
+        //                    << value_ << "\t"
+        //                    << mse_first_47 << "\t" << max_diff_first_47 << "\t"
+        //                    << obs_mean << "\t" << obs_std << "\t" << obs_min << "\t" << obs_max << "\t"
+        //                    << decoder_mean << "\t" << decoder_std << "\t" << decoder_min << "\t" << decoder_max << "\t"
+        //                    << action_mean << "\t" << action_std << "\t" << action_min << "\t" << action_max << "\t"
+        //                    << latent_mean << "\t" << latent_std << "\t" << latent_min << "\t" << latent_max << "\t"
+        //                    << base_lin_vel(0) << "\t" << base_lin_vel(1) << "\t" << base_lin_vel(2) << "\t"
+        //                    << base_ang_vel(0) << "\t" << base_ang_vel(1) << "\t" << base_ang_vel(2) << "\t"
+        //                    << non_zero_beyond_47
+        //                    << std::endl;
     }
     debug_counter++;
 

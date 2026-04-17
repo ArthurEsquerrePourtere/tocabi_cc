@@ -128,18 +128,20 @@ public:
     // ART specific variables
     Eigen::Matrix<double, 12, 1> torque_sum_lpf_;
     bool use_lpf_torque_ = false;
-    double torque_cutoff_freq = 80.0;
+    double torque_cutoff_freq = 20.0;
     Eigen::MatrixXd prev_rl_action_;
     bool use_margin_inference_ = false;
     bool do_inference_ = false;
     bool use_lpf_dof_vel_ = true;
     double dof_vel_cutoff_freq_ = 60.0;
     bool use_lpf_ang_vel_ = true;
-    double ang_vel_cutoff_freq_ = 60.0;
-    bool use_lpf_proj_grav_ = false;
+    double ang_vel_cutoff_freq_ = 8.0;
+    bool use_lpf_proj_grav_ = true;
     double proj_grav_cutoff_freq_ = 80.0;
     double actions_scale_ = 1.0;
     Vector3_t projected_grav_lpf_;
+    bool tanh_dof_vel_ = false;
+    double tanh_dof_vel_scale_ = 3.0;
 
 
     Eigen::Matrix<double, MODEL_DOF, MODEL_DOF> kp_;
