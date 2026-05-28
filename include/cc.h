@@ -92,8 +92,8 @@ public:
 
     static const int num_action = 12;
     static const int num_actuator_action = 12;
-    static const int num_cur_state = 47;
-    static const int num_cur_critic_state = 165;
+    static const int num_cur_state = 50;
+    static const int num_cur_critic_state = 167;
     static const int num_cur_latent = 24;
     static const int num_cur_h = 256;
 
@@ -107,7 +107,7 @@ public:
     std::ofstream writeFile;
     std::ofstream evalFile;
 
-    bool is_on_robot_ = true;
+    bool is_on_robot_ = false;
     bool is_write_file_ = true;
     bool random_command_mode_ = false;
     Eigen::Matrix<double, MODEL_DOF, 1> q_dot_lpf_;
@@ -138,6 +138,8 @@ public:
     double ang_vel_cutoff_freq_ = 8.0;
     bool use_lpf_proj_grav_ = true;
     double proj_grav_cutoff_freq_ = 80.0;
+    bool use_lpf_lin_vel_ = true;
+    double lin_vel_cutoff_freq_ = 8.0;
     double actions_scale_ = 1.0;
     Vector3_t projected_grav_lpf_;
     bool tanh_dof_vel_ = false;
@@ -160,7 +162,7 @@ public:
     std::uniform_real_distribution<float> ang_yaw_dist_;
     double action_dt_accumulate_ = 0.0;
 
-    Vector3_t base_lin_vel, base_ang_vel, base_ang_vel_lpf_;
+    Vector3_t base_lin_vel, base_lin_vel_lpf_,base_ang_vel, base_ang_vel_lpf_;
     double heading;
     Eigen::Vector3d euler_angle_;
 
@@ -175,6 +177,7 @@ public:
 
     std::string base_path = "";
     void loadCommand(const std::string &command_file);
+    void updateCommandFromTimeline(const std::string &command_file);
 
     // BIPED WALKING PARAMETER
     float phase_indicator_ = 0;
@@ -213,7 +216,7 @@ public:
     double command_profile_y_start_us_ = 2.0e6;
     double command_profile_yaw_start_us_ = 2.0e6;
 
-    int ctrl_mode = 0; // 0 for joystick
+    int ctrl_mode = 0; // 0 for joystick, 1 for command file, 2 for timeline file
 
 private:
     Eigen::VectorQd ControlVal_;

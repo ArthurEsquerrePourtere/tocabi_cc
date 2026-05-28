@@ -67,14 +67,19 @@ CustomController::CustomController(RobotData &rd) : rd_(rd), //, wbc_(dc.wbc_)
 
     if (is_write_file_)
     {
+        // add time to the file name
+        std::time_t t = std::time(0);
+        std::tm *now = std::localtime(&t);
+        std::string time_str = std::to_string(now->tm_year + 1900) + "-" + std::to_string(now->tm_mon + 1) + "-" + std::to_string(now->tm_mday) + "_" + std::to_string(now->tm_hour) + "-" + std::to_string(now->tm_min) + "-" + std::to_string(now->tm_sec);
+
         if (is_on_robot_)
         {
-            writeFile.open("/home/dyros/catkin_ws/src/tocabi_cc/result/data.csv", std::ofstream::out);
+            writeFile.open("/home/dyros/catkin_ws/src/tocabi_cc/result/data_" + time_str + ".csv", std::ofstream::out);
         }
         else
         {
             // writeFile.open("/home/rui/ubuntu-20-04/raibertGRU_ws/src/tocabi_cc/result/rui_data.csv", std::ofstream::out);
-            writeFile.open("/home/dyros/raibertGRU_ws/src/tocabi_cc/result/data.csv", std::ofstream::out);
+            writeFile.open("/home/dyros/raibertGRU_ws/src/tocabi_cc/result/data_" + time_str + ".csv", std::ofstream::out);
         }
         writeFile << std::fixed << std::setprecision(8);
 
@@ -85,10 +90,10 @@ CustomController::CustomController(RobotData &rd) : rd_(rd), //, wbc_(dc.wbc_)
         // }
 
         // prepare 47 input string for CSV header
-        // std::string input_header;
-        // for (int i = 0; i < num_cur_state; i++) {
-        //     input_header += "input_" + std::to_string(i) + "\t";
-        // }
+        std::string input_header;
+        for (int i = 0; i < num_cur_state; i++) {
+            input_header += "input_" + std::to_string(i) + "\t";
+        }
 
         // prepare 12 action string for CSV header
         std::string action_header;
@@ -116,12 +121,15 @@ CustomController::CustomController(RobotData &rd) : rd_(rd), //, wbc_(dc.wbc_)
                   << "qdot_lpf_0\tqdot_lpf_1\tqdot_lpf_2\tqdot_lpf_3\tqdot_lpf_4\tqdot_lpf_5\t"
                   << "qdot_lpf_6\tqdot_lpf_7\tqdot_lpf_8\tqdot_lpf_9\tqdot_lpf_10\tqdot_lpf_11\t"
                   << "base_lin_vel_x\tbase_lin_vel_y\tbase_lin_vel_z\t"
-                  << "base_ang_vel_x\tbase_ang_vel_y\tbase_ang_vel_z\t"
+                  << 
+                  "base_lin_vel_lpf_x\tbase_lin_vel_lpf_y\tbase_lin_vel_lpf_z\t"
+                  <<
+                  "base_ang_vel_x\tbase_ang_vel_y\tbase_ang_vel_z\t"
                   << "base_ang_vel_lpf_x\tbase_ang_vel_lpf_y\tbase_ang_vel_lpf_z\t"
                   << "projected_grav_x\tprojected_grav_y\tprojected_grav_z\t"
                   << "cmd_x\tcmd_y\tcmd_yaw\t"
                 //   << latent_header
-                //   << input_header
+                  << input_header
                   << action_header
                 //   << h0_header
                 //   << "rf_x\trf_y\trf_z\t"
@@ -132,7 +140,7 @@ CustomController::CustomController(RobotData &rd) : rd_(rd), //, wbc_(dc.wbc_)
     initVariable();
     loadOnnX();
 
-    joy_sub_ = nh_.subscribe<sensor_msgs::Joy>("joy_wh", 10, &CustomController::joyCallback, this);
+    joy_sub_ = nh_.subscribe<sensor_msgs::Joy>("joy", 10, &CustomController::joyCallback, this);
     
     // Initialize target velocity publisher for MuJoCo visualization
     target_vel_pub_ = nh_.advertise<std_msgs::Float32MultiArray>("/mujoco_ros_interface/target_velocity", 10);
@@ -148,6 +156,7 @@ void CustomController::initVariable()
     // set all values of prev_rl_action_ to zero
     for (size_t i = 0; i < num_action; i++) {
         prev_rl_action_(i) = 0.0f;
+        rl_action_(i) = 0.0f;
     }
 
     state_cur_.resize(num_cur_state, 1);
@@ -167,8 +176,15 @@ void CustomController::initVariable()
                     10, 10,
                     64, 64, 64, 64, 23, 23, 10, 10;  
                     
-    q_init_ << 0.0, 0.0, -0.24, 0.6, -0.36, 0.0,
-                0.0, 0.0, -0.24, 0.6, -0.36, 0.0,
+    // q_init_ << 0.0, 0.0, -0.24, 0.6, -0.36, 0.0,
+    //             0.0, 0.0, -0.24, 0.6, -0.36, 0.0,
+    //             0.0, 0.0, 0.0,
+    //             0.3, 0.3, 1.5, -1.27, -1.0, 0.0, -1.0, 0.0,
+    //             0.0, 0.0,
+    //             -0.3, -0.3, -1.5, 1.27, 1.0, 0.0, 1.0, 0.0;
+
+    q_init_ << 0.0, 0.0, -0.46, 1.04, -0.58, -0.0,
+                0.0, -0.0, -0.46, 1.04, -0.58, 0.0,
                 0.0, 0.0, 0.0,
                 0.3, 0.3, 1.5, -1.27, -1.0, 0.0, -1.0, 0.0,
                 0.0, 0.0,
@@ -220,6 +236,7 @@ void CustomController::initVariable()
     // Woohyun
     initBias();
     base_lin_vel.setZero();
+    base_lin_vel_lpf_.setZero();
     base_ang_vel.setZero();
     base_ang_vel_lpf_.setZero();
     command_vel_filtered_.setZero();
@@ -240,7 +257,7 @@ void CustomController::initVariable()
 
 void CustomController::loadOnnX()
 {
-    string cur_path = "/home/dyros/raibertGRU_ws/src/tocabi_cc/onnx_files/";
+    string cur_path = "/home/dyros/raibertGRU_ws/src/tocabi_cc/onnx_files_l/";
     string actor_path = cur_path + "actor.onnx";
     string normalizer_path = cur_path + "normalizer.onnx";
     string denormalizer_path = cur_path + "denormalizer.onnx";
@@ -250,7 +267,7 @@ void CustomController::loadOnnX()
 
     if (is_on_robot_)
     {
-        cur_path = "/home/dyros/catkin_ws/src/tocabi_cc/onnx_files/";
+        cur_path = "/home/dyros/catkin_ws/src/tocabi_cc/onnx_files_l/";
         actor_path = cur_path + "actor.onnx"; 
         normalizer_path = cur_path + "normalizer.onnx";
         denormalizer_path = cur_path + "denormalizer.onnx";
@@ -258,7 +275,7 @@ void CustomController::loadOnnX()
         critic_path = cur_path + "critic.onnx";
     }
 
-    if (ctrl_mode){
+    if (ctrl_mode == 1){
         loadCommand(cur_path + "commands.txt");
     }
 
@@ -586,11 +603,21 @@ void CustomController::processNoise()
     // for base ang vel lpf
     if (time_cur_ - time_pre_ > 0.0)
     {
+        Eigen::Quaterniond q;
+        q.x() = rd_cc_.q_virtual_(3);
+        q.y() = rd_cc_.q_virtual_(4);
+        q.z() = rd_cc_.q_virtual_(5);
+        q.w() = rd_cc_.q_virtual_(MODEL_DOF_QVIRTUAL-1);
+
         base_ang_vel = (rd_cc_.q_dot_virtual_.segment(3,3));
         base_ang_vel_lpf_ = DyrosMath::lpf<3>(base_ang_vel, base_ang_vel_lpf_, 1/(time_cur_ - time_pre_), ang_vel_cutoff_freq_);
+
+        base_lin_vel = q.conjugate()*(rd_cc_.q_dot_virtual_.segment(0,3));
+        base_lin_vel_lpf_ = DyrosMath::lpf<3>(base_lin_vel, base_lin_vel_lpf_, 1/(time_cur_ - time_pre_), lin_vel_cutoff_freq_);
     } else
     {
         base_ang_vel_lpf_ = base_ang_vel_lpf_;
+        base_lin_vel_lpf_ = base_lin_vel_lpf_;
     }
 
     // for projected gravity lpf
@@ -622,13 +649,14 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
     q.z() = rd_cc_.q_virtual_(5);
     q.w() = rd_cc_.q_virtual_(MODEL_DOF_QVIRTUAL-1);   
     
+    // cout << "lin vel : " << rd_cc_.q_dot_virtual_.segment(0,3).transpose() << endl;
     base_lin_vel = q.conjugate()*(rd_cc_.q_dot_virtual_.segment(0,3));
     base_ang_vel = (rd_cc_.q_dot_virtual_.segment(3,3));
 
-    Eigen::Matrix3d R = q.toRotationMatrix();
-    double roll_deg  = atan2(R(2,1), R(2,2)) * 180.0 / M_PI;
-    double pitch_deg = atan2(-R(2,0), sqrt(R(2,1)*R(2,1) + R(2,2)*R(2,2))) * 180.0 / M_PI;
-    double yaw_deg   = atan2(R(1,0), R(0,0)) * 180.0 / M_PI;
+    // Eigen::Matrix3d R = q.toRotationMatrix();
+    // double roll_deg  = atan2(R(2,1), R(2,2)) * 180.0 / M_PI;
+    // double pitch_deg = atan2(-R(2,0), sqrt(R(2,1)*R(2,1) + R(2,2)*R(2,2))) * 180.0 / M_PI;
+    // double yaw_deg   = atan2(R(1,0), R(0,0)) * 180.0 / M_PI;
     // std::cout << "Roll: " << roll_deg << " Pitch: " << pitch_deg << " Yaw: " << yaw_deg << std::endl;
     // std::cout << "In rad Roll : " << atan2(R(2,1), R(2,2)) << " Pitch: " << atan2(-R(2,0), sqrt(R(2,1)*R(2,1) + R(2,2)*R(2,2))) << " Yaw: " << atan2(R(1,0), R(0,0)) << std::endl;
 
@@ -646,6 +674,8 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
     Vector3_t grav, projected_grav, forward_vec;
     grav << 0, 0, -1.;
     forward_vec << 1., 0, 0;
+    // cout << "Quaternion: " << q.x() << ", " << q.y() << ", " << q.z() << ", " << q.w() << endl;
+    // exit(0);
     projected_grav = q.conjugate()*grav;
 
     Vector3_t forward = q * forward_vec;
@@ -663,6 +693,13 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
         data_idx++;
         state_cur_[data_idx] = projected_grav_lpf_(2);
         data_idx++;
+
+        // state_cur_[data_idx] = projected_grav_lpf_(0)/1.2;
+        // data_idx++;
+        // state_cur_[data_idx] = projected_grav_lpf_(1)/1.2;
+        // data_idx++;
+        // state_cur_[data_idx] = (projected_grav_lpf_(2)+1)/1.2 - 1.;
+        // data_idx++;
     } else {
         state_cur_[data_idx] = projected_grav(0); 
         data_idx++;
@@ -671,6 +708,7 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
         state_cur_[data_idx] = projected_grav(2);
         data_idx++;
     }
+    // cout << "Projected Gravity in state : " << state_cur_[3] << ", " << state_cur_[4] << ", " << state_cur_[5] << endl;
 
     float prev_step_period_ = step_period_;
     if (random_command_mode_){
@@ -683,9 +721,19 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
             std::cout << "[Random Commands] x:" << commands_(0) << " y:" << commands_(1) << " yaw:" << commands_(2) << std::endl;
         }
     }
+
+    // set commands
+    if (ctrl_mode == 2 and !is_on_robot_){
+        string cur_path = "/home/dyros/raibertGRU_ws/src/tocabi_cc/";
+        updateCommandFromTimeline(cur_path + "timeline.txt");
+    } 
+    // else {
+    //     // cout << "Time: " << time_cur_ << endl;
     commands_(0) = 0.35;
-    commands_(1) = 0.0;
-    commands_(2) = 0.0;
+    commands_(1) = 0.;
+    commands_(2) = 0.;
+    // }
+
     if (command_profile_x_enabled_)
     {
         const double t_x = (rd_cc_.control_time_us_ - command_profile_x_start_us_) / 1e6;
@@ -767,6 +815,16 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
         state_cur_[data_idx] = DyrosMath::minmax_cut(rl_action_(i), -actions_scale_, actions_scale_);
         data_idx++;
     }
+
+    for (int i = 0; i < 3; i++){
+        if (use_lpf_lin_vel_){
+            state_cur_[data_idx] = base_lin_vel_lpf_(i);
+        } else {
+            state_cur_[data_idx] = base_lin_vel(i);
+        }
+        data_idx++;
+    }
+
     assert(data_idx == num_cur_state);
     for (int i = 0; i < num_cur_critic_state; i++){
         if (i < num_cur_state) critic_state_cur_[i] = state_cur_[i];
@@ -865,6 +923,34 @@ void CustomController::processEverythingElse()
     for (size_t i = 0; i < num_cur_h; i++){
         h_cur_[i] = output_tensors[output_hn_idx_].GetTensorMutableData<float>()[i];
     }
+    //randonly zero out one h_cur_ value to test robustness
+    // set number of values to zero out
+    int num_values_to_zero = 0;
+    if (true) {
+
+        std::random_device rd;  
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<> dis(0, num_cur_h - 1);
+        for (int i = 0; i < num_values_to_zero; i++) {
+            int idx_to_zero = dis(gen);
+            h_cur_[idx_to_zero] = 0.0;
+            std::cout << "[Debug] Zeroing out h_cur_ at index " << idx_to_zero << " to test robustness." << std::endl;
+        }
+
+        // std::mt19937 gen(rd());
+        // std::uniform_int_distribution<> dis(0, num_cur_h - 1);
+        // int random_index = dis(gen);
+        // h_cur_[random_index] = 0.0;
+        // if (num_values_to_zero > 0) {
+        //     std::cout << "[Debug] Zeroing out " << num_values_to_zero << " values in h_cur_ at random indices to test robustness." << std::endl;
+        //     for (int i = 0; i < num_values_to_zero; i++) {
+        //         int idx_to_zero = dis(gen);
+        //         h_cur_[idx_to_zero] = 0.0;
+        //         std::cout << "[Debug] Zeroing out h_cur_ at index " << idx_to_zero << std::endl;
+        //     }
+        // } else {
+        // std::cout << "[Debug] Zeroing out h_cur_ at index " << random_index << " to test robustness." << std::endl;
+    }
     for (size_t i = 0; i < num_cur_latent; i++) {
         latent_cur_[i] = output_tensors[output_latent_idx_].GetTensorMutableData<float>()[i];
     }
@@ -917,7 +1003,7 @@ void CustomController::processEverythingElse()
     //     file_opened = true;
     // }
     
-    if (debug_counter % 2000 == 0) {  // Print every 1000 iterations to avoid spam
+    if (debug_counter % 100 == 0) {  // Print every 1000 iterations to avoid spam
         std::cout << "\n========== SIM2REAL GAP ANALYSIS (iteration " << debug_counter << ") ==========" << std::endl;
 
 // // ========== Dimension-Specific Sim2Real Gap Analysis ==========
@@ -976,6 +1062,11 @@ void CustomController::processEverythingElse()
         float max_diff_first_47 = 0.0f;
         for (size_t i = 0; i < num_cur_state; i++) {
             float diff = normalized_state_cur_[i] - normalized_critic_state_cur_[i];
+            if (i==3 || i==4)            {
+                std::cout << "Projected gravity dim " << i-3 << " - Normalized Obs: " << normalized_state_cur_[i] 
+                          << ", Decoder Output: " << normalized_critic_state_cur_[i] 
+                          << ", Diff: " << diff << std::endl;
+            }
             mse_first_47 += diff * diff;
             max_diff_first_47 = std::max(max_diff_first_47, std::abs(diff));
         }
@@ -1004,7 +1095,55 @@ void CustomController::processEverythingElse()
         }
         float decoder_mean = decoder_sum / num_cur_state;
         float decoder_std = std::sqrt((decoder_sum_sq / num_cur_state) - (decoder_mean * decoder_mean));
-        
+
+        // analyze mean error for each category (ang vel, proj grav, commands, dof pos, dof vel, phase ind, prev actions) and print it
+        float ang_vel_error = 0.0f;
+        float proj_grav_error = 0.0f;
+        float commands_error = 0.0f;
+        float dof_pos_error = 0.0f;
+        float dof_vel_error = 0.0f;
+        float phase_ind_error = 0.0f;
+        float prev_actions_error = 0.0f;
+
+        for (size_t i = 0; i < num_cur_state; i++) {
+            float diff = std::abs(normalized_state_cur_[i] - normalized_critic_state_cur_[i]);
+            if (i < 3) {
+                ang_vel_error += diff;
+            } else if (i < 6) {
+                proj_grav_error += diff;
+            } else if (i < 9) {
+                commands_error += diff;
+            } else if (i < 9 + num_actuator_action) {
+                dof_pos_error += diff;
+            } else if (i < 9 + 2 * num_actuator_action) {
+                dof_vel_error += diff;
+            } else if (i < 9 + 2 * num_actuator_action + 2) {
+                phase_ind_error += diff;
+            } else {
+                prev_actions_error += diff;
+            }
+        }
+        ang_vel_error /= 3;
+        proj_grav_error /= 3;
+        commands_error /= 3;
+        dof_pos_error /= num_actuator_action;
+        dof_vel_error /= num_actuator_action;
+        phase_ind_error /= 2;
+        prev_actions_error /= num_actuator_action;
+
+        std::cout << "Mean error for each category:" << std::endl;
+        std::cout << "  Angular Velocity: " << ang_vel_error << std::endl;
+        std::cout << "  Projected Gravity: " << proj_grav_error << std::endl;
+        std::cout << "  Projected gravity 1st dim: " << std::abs(normalized_state_cur_[3] - normalized_critic_state_cur_[3]) << std::endl;
+        std::cout << "  Projected gravity 2nd dim: " << std::abs(normalized_state_cur_[4] - normalized_critic_state_cur_[4]) << std::endl;
+        std::cout << "  Projected gravity 3rd dim: " << std::abs(normalized_state_cur_[5] - normalized_critic_state_cur_[5]) << std::endl;
+        std::cout << "  Commands: " << commands_error << std::endl;
+        std::cout << "  DOF Positions: " << dof_pos_error << std::endl;
+        std::cout << "  DOF Velocities: " << dof_vel_error << std::endl;
+        std::cout << "  Phase Indicator: " << phase_ind_error << std::endl;
+        std::cout << "  Previous Actions: " << prev_actions_error << std::endl;
+
+
         // Action statistics
         float action_sum = 0.0f, action_sum_sq = 0.0f, action_min = rl_action_(0), action_max = rl_action_(0);
         for (int i = 0; i < num_actuator_action; i++) {
@@ -1036,6 +1175,19 @@ void CustomController::processEverythingElse()
                 non_zero_beyond_47++;
             }
         }
+
+        //h_cur_ statistics
+        float h_sum = 0.0f, h_sum_sq = 0.0f, h_min = h_cur_[0], h_max = h_cur_[0];
+        for (size_t i = 0; i < num_cur_h; i++) {
+            float val = h_cur_[i];
+            h_sum += val;
+            h_sum_sq += val * val;
+            h_min = std::min(h_min, val);
+            h_max = std::max(h_max, val);
+        }
+        float h_mean = h_sum / num_cur_h;
+        float h_std = std::sqrt((h_sum_sq / num_cur_h) - (h_mean * h_mean));
+
         
         // Print to console
         std::cout << "Observation (normalized, first 47):" << std::endl;
@@ -1052,6 +1204,9 @@ void CustomController::processEverythingElse()
         std::cout << "Latent:" << std::endl;
         std::cout << "  Mean: " << latent_mean << ", Std: " << latent_std 
                   << ", Min: " << latent_min << ", Max: " << latent_max << std::endl;
+        std::cout << "h_cur_:" << std::endl;
+        std::cout << "  Mean: " << h_mean << ", Std: " << h_std 
+                  << ", Min: " << h_min << ", Max: " << h_max << std::endl;
         std::cout << "Value: " << value_ << std::endl;
         std::cout << "Non-zero decoder elements beyond 47: " << non_zero_beyond_47 << " / " << (num_cur_critic_state - num_cur_state) << std::endl;
         std::cout << "==========================================\n" << std::endl;
@@ -1139,7 +1294,11 @@ void CustomController::processEverythingElse()
             writeFile << q_dot_lpf_.segment(0, 12).transpose() << "\t";
             
             // Base linear and angular velocity
-            writeFile << base_lin_vel.transpose() << "\t" << base_ang_vel.transpose() << "\t";
+            writeFile << base_lin_vel.transpose() << "\t";
+
+            writeFile << base_lin_vel_lpf_.transpose() << "\t";            
+            
+            writeFile << base_ang_vel.transpose() << "\t";
 
             // Base ang vel lpf
             writeFile << base_ang_vel_lpf_.transpose() << "\t";
@@ -1156,10 +1315,10 @@ void CustomController::processEverythingElse()
             // }
 
             // save every 47 values of input_tensors
-            // float* float_ptr = input_tensors[0].GetTensorMutableData<float>();
-            // for (size_t i = 0; i < num_cur_state; i++) {
-            //     writeFile << float_ptr[i] << "\t";
-            // }
+            float* float_ptr = input_tensors[0].GetTensorMutableData<float>();
+            for (size_t i = 0; i < num_cur_state; i++) {
+                writeFile << float_ptr[i] << "\t";
+            }
 
             // save every output tensor value
             for (size_t i = 0; i < num_actuator_action; i++) {
@@ -1291,6 +1450,10 @@ void CustomController::computeSlow()
         for (int i = 0; i < num_actuator_action; i++){
             if (ctrl_type == 'T'){
                 torque_rl_(i) = DyrosMath::minmax_cut(rl_action_(i), -actions_scale_, actions_scale_) * torque_bound_(i) / actions_scale_;
+                
+                // if (i==7 or i==1){
+                //     torque_rl_(i) *= 0.8;
+                // }
             }
             if (ctrl_type == 'P'){
                 float q_std = (pd_limit(i, 1) - pd_limit(i, 0)) / 2;
@@ -1299,6 +1462,14 @@ void CustomController::computeSlow()
             }
             
         }
+
+        // if (do_inference_){
+        //     cout << "action RL before scaling: " << rl_action_.transpose() << endl;
+        //     cout << "torque RL after scaling: " << torque_rl_.transpose() << endl;
+        // }
+
+        // if (do_inference_)
+            // cout << "Torque RL: " << torque_rl_.transpose().head(12) << endl;
 
         // Low-pass filter the velocity commands to keep upper-body motion smooth
         const Eigen::Vector3d filtered_prev = command_vel_filtered_prev_;
@@ -1354,6 +1525,7 @@ void CustomController::computeSlow()
         const double cam_activation_threshold = 0.05;
         const double cam_release_threshold = 3.0;
 
+        // cout << "CAM Yaw: " << cam_yaw << ", Forward Cmd: " << forward_cmd << ", Engage: " << engage << endl;
         const bool forward_motion = std::abs(forward_cmd) > cam_activation_threshold;
         // Engage yaw CAM damping only when commanded to move forward/backward
         if (forward_motion)
@@ -1391,49 +1563,57 @@ void CustomController::computeSlow()
 
         const double posture_scale = cam_control_active_ ? 0.4 : 1.0;
         const double damping_scale = cam_control_active_ ? 0.4 : 0.8;
-        // if (upper_body_motion_){
+        bool upper_body_motion_ = false;
+        if (upper_body_motion_){
 
-        //     for (int i = num_actuator_action; i < MODEL_DOF; i++)
-        //     {
-        //         const double posture = posture_scale * kp_(i, i) * (q_upper_target(i) - q_noise_(i));
-        //         const double damping = damping_scale * (-kv_(i, i) * q_vel_noise_(i));
-        //         // const double torque = posture + damping + cam_torque(i);
-        //         const double torque = posture + damping;
-        //         torque_rl_(i) = DyrosMath::minmax_cut(torque, -torque_bound_(i), torque_bound_(i));
-        //     }
-        // }
-        // else{
-            // }
-        for (int i = num_actuator_action; i < MODEL_DOF; i++)
-        {
-            torque_rl_(i) = kp_(i, i) * (q_init_(i) - q_noise_(i)) - kv_(i, i) * q_vel_noise_(i);
-        }
-        
-        if (rd_cc_.control_time_us_ < start_time_ + 0.1e6)
-        {
-            for (int i = 0; i <MODEL_DOF; i++)
-                torque_spline_(i) = DyrosMath::cubic(rd_cc_.control_time_us_, start_time_, start_time_ + 0.1e6, torque_init_(i), torque_rl_(i), 0.0, 0.0);
-
-            rd_.torque_desired = torque_spline_;
-            torque_sum_lpf_ = torque_spline_.head(12);    
+            for (int i = num_actuator_action; i < MODEL_DOF; i++)
+            {
+                const double posture = posture_scale * kp_(i, i) * (q_upper_target(i) - q_noise_(i));
+                const double damping = damping_scale * (-kv_(i, i) * q_vel_noise_(i));
+                // const double torque = posture + damping + cam_torque(i);
+                const double torque = posture + damping;
+                torque_rl_(i) = DyrosMath::minmax_cut(torque, -torque_bound_(i), torque_bound_(i));
+            }
         }
         else{
-            if (use_lpf_torque_){
-                for (int i = 0; i < 12; i++){
-                    // if (i==4 || i==5 || i==10 || i==11){
-                    torque_sum_lpf_(i) = 1 / (1 + 2 * M_PI * torque_cutoff_freq * (1/pd_hz_)) * torque_sum_lpf_(i) //previous tick torque
-                                    + (2 * M_PI * torque_cutoff_freq * (1/pd_hz_)) / (1 + 2 * M_PI * torque_cutoff_freq * (1/pd_hz_)) * torque_rl_(i); //updated torque
-                    // }
-                    // else{
-                    //     torque_sum_lpf_(i) = torque_rl_(i);
-                    
-                    // }
-                }
-                rd_.torque_desired = torque_rl_;
-                rd_.torque_desired.head(12) = torque_sum_lpf_;
+            for (int i = num_actuator_action; i < MODEL_DOF; i++)
+            {
+                torque_rl_(i) = kp_(i, i) * (q_init_(i) - q_noise_(i)) - kv_(i, i) * q_vel_noise_(i);
+            }
+        }
+
+        if (rd_cc_.control_time_us_ < start_time_ + 0.e6)
+        {
+            rd_.torque_desired = torque_init_;
+            torque_sum_lpf_ = torque_init_.head(12);
+        } 
+        else{
+            if (rd_cc_.control_time_us_ < start_time_ + 0.1e6)
+            {
+                for (int i = 0; i <MODEL_DOF; i++)
+                    torque_spline_(i) = DyrosMath::cubic(rd_cc_.control_time_us_, start_time_ + 0.e6, start_time_ + 0.1e6, torque_init_(i), torque_rl_(i), 0.0, 0.0);
+
+                rd_.torque_desired = torque_spline_;
+                torque_sum_lpf_ = torque_spline_.head(12);    
             }
             else{
-                rd_.torque_desired = torque_rl_;
+                if (use_lpf_torque_){
+                    for (int i = 0; i < 12; i++){
+                        // if (i==4 || i==5 || i==10 || i==11){
+                        torque_sum_lpf_(i) = 1 / (1 + 2 * M_PI * torque_cutoff_freq * (1/pd_hz_)) * torque_sum_lpf_(i) //previous tick torque
+                                        + (2 * M_PI * torque_cutoff_freq * (1/pd_hz_)) / (1 + 2 * M_PI * torque_cutoff_freq * (1/pd_hz_)) * torque_rl_(i); //updated torque
+                        // }
+                        // else{
+                        //     torque_sum_lpf_(i) = torque_rl_(i);
+                        
+                        // }
+                    }
+                    rd_.torque_desired = torque_rl_;
+                    rd_.torque_desired.head(12) = torque_sum_lpf_;
+                }
+                else{
+                    rd_.torque_desired = torque_rl_;
+                }
             }
         }
 
@@ -1503,6 +1683,8 @@ void CustomController::computePlanner(){}
 
 void CustomController::copyRobotData(RobotData &rd_l)
 {
+    // cout << "rd lin vel: " << rd_l.q_dot_virtual_.segment(0,3).transpose() << endl;
+    // cout << "rd_cc_ lin vel: " << rd_cc_.q_dot_virtual_.segment(0,3).transpose() << endl;
     std::memcpy(&rd_cc_, &rd_l, sizeof(RobotData));
 }
 
@@ -1546,7 +1728,13 @@ void CustomController::loadCommand(const std::string &command_file)
 }
 
 void CustomController::updateNextStepTime()
-{           
+{       
+    // static double count_ticks = 0.;
+    // if (count_ticks < hz_ * 2.0) {
+    //     count_ticks += 1.0;
+    //     step_ticks_ = -1.;
+    //     return;
+    // }
     step_ticks_ += del_t;
     if (step_ticks_ >= step_period_) {
         step_ticks_ = 0.;
@@ -1555,9 +1743,39 @@ void CustomController::updateNextStepTime()
     }
 }
 
+// void CustomController::joyCallback(const sensor_msgs::Joy::ConstPtr& joy)
+// {
+//     commands_(0) = DyrosMath::minmax_cut(vel_scale_x_*joy->axes[1], -0.5, 0.5);
+//     commands_(1) = DyrosMath::minmax_cut(vel_scale_y_*joy->axes[0] , -0.5, 0.5);
+
+//     if (joy->buttons[1] == 1.0 && vel_scale_x_ < 1.0 && vel_scale_y_ < 0.3){
+//         vel_scale_x_ += 0.03;
+//         vel_scale_y_ += 0.01;
+//         ROS_INFO("Velocity X : %f", vel_scale_x_);
+//         ROS_INFO("Velocity Y : %f", vel_scale_y_);
+//     }
+
+//     if (joy->buttons[0] == 1.0 && vel_scale_x_ > 0.1 && vel_scale_y_ > 0.03){
+//         vel_scale_x_ -= 0.03;
+//         vel_scale_y_ -= 0.01;
+//         ROS_INFO("Velocity X : %f", vel_scale_x_);
+//         ROS_INFO("Velocity Y : %f", vel_scale_y_);
+//     }
+//     if(joy->buttons[6] == 1){
+//         commands_(2) = 0.6;
+//     }
+//     if(joy->buttons[7] == 1){
+//         commands_(2) = -0.6;
+//     }
+//     if(joy->buttons[6] != 1 && joy->buttons[7] != 1){
+//         commands_(2) = 0.;
+//     }
+// }
+
 void CustomController::joyCallback(const sensor_msgs::Joy::ConstPtr& joy)
 {
-    commands_(0) = DyrosMath::minmax_cut(vel_scale_x_*joy->axes[1], -0.5, 0.5);
+    cout << "Joy Callback!" << endl;
+    commands_(0) = DyrosMath::minmax_cut(vel_scale_x_*joy->axes[1], -0.5, 1.);
     commands_(1) = DyrosMath::minmax_cut(vel_scale_y_*joy->axes[0] , -0.5, 0.5);
 
     if (joy->buttons[1] == 1.0 && vel_scale_x_ < 1.0 && vel_scale_y_ < 0.3){
@@ -1573,14 +1791,77 @@ void CustomController::joyCallback(const sensor_msgs::Joy::ConstPtr& joy)
         ROS_INFO("Velocity X : %f", vel_scale_x_);
         ROS_INFO("Velocity Y : %f", vel_scale_y_);
     }
-    if(joy->buttons[6] == 1){
-        commands_(2) = 0.6;
-    }
-    if(joy->buttons[7] == 1){
-        commands_(2) = -0.6;
-    }
-    if(joy->buttons[6] != 1 && joy->buttons[7] != 1){
+    // if(joy->buttons[6] == 1){
+    //     commands_(2) = 0.6;
+    // }
+    // if(joy->buttons[7] == 1){
+    //     commands_(2) = -0.6;
+    // }
+    // if(joy->buttons[6] != 1 && joy->buttons[7] != 1){
+    //     commands_(2) = 0.;
+    // }
+    if (joy->axes[2] < 1. && joy->axes[2] != 0.){
+        commands_(2) = DyrosMath::minmax_cut(-(joy->axes[2]-1), 0., 2.)/4.;
+    } else if (joy->axes[5] < 1. && joy->axes[5] != 0.){
+        commands_(2) = -DyrosMath::minmax_cut(-(joy->axes[5]-1), 0., 2.)/4.;
+    } else {
         commands_(2) = 0.;
+    }
+}
+
+void CustomController::updateCommandFromTimeline(const std::string &command_file)
+{
+    static std::vector<Eigen::Vector3d> timeline;
+    static bool loaded = false;
+    static double start_walking_time = -1.0; // Captures the start of the test
+
+    // 1. Load the file (Fixed to handle comments/formatting)
+    if (!loaded) {
+        std::ifstream file(command_file);
+        if (!file) {
+            ROS_ERROR("Failed to open timeline file: %s", command_file.c_str());
+            loaded = true; return;
+        }
+        
+        std::string line;
+        while (std::getline(file, line)) {
+            // Remove comments and skip empty lines
+            size_t comment_pos = line.find('#');
+            if (comment_pos != std::string::npos) line = line.substr(0, comment_pos);
+            if (line.find_first_not_of(" \t\r\n") == std::string::npos) continue;
+
+            std::stringstream ss(line);
+            double vx, vy, vyaw;
+            if (ss >> vx >> vy >> vyaw) {
+                timeline.push_back(Eigen::Vector3d(vx, vy, vyaw));
+            }
+        }
+        file.close();
+        loaded = true;
+        ROS_INFO("Timeline loaded: %lu steps detected.", timeline.size());
+    }
+
+    // 2. Synchronize time
+    double current_time = rd_cc_.control_time_us_ / 1e6;
+
+    // Only start the clock if we are actually in walking mode
+    // (Replace 'is_walking_state' with your actual variable name, e.g., walking_tick > 0)
+    if (start_walking_time < 0) {
+        start_walking_time = current_time;
+    }
+
+    double elapsed = current_time - start_walking_time;
+    
+    // 3. Select command (every 5 seconds relative to start)
+    int index = static_cast<int>(elapsed / 5.0);
+
+    if (index < timeline.size()) {
+        commands_(0) = timeline[index](0);
+        commands_(1) = timeline[index](1);
+        commands_(2) = timeline[index](2);
+    } else {
+        // Optional: Stop the robot when timeline ends
+        commands_.setZero();
     }
 }
 
