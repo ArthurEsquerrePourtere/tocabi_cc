@@ -90,10 +90,10 @@ CustomController::CustomController(RobotData &rd) : rd_(rd), //, wbc_(dc.wbc_)
         // }
 
         // prepare 47 input string for CSV header
-        std::string input_header;
-        for (int i = 0; i < num_cur_state; i++) {
-            input_header += "input_" + std::to_string(i) + "\t";
-        }
+        // std::string input_header;
+        // for (int i = 0; i < num_cur_state; i++) {
+        //     input_header += "input_" + std::to_string(i) + "\t";
+        // }
 
         // prepare 12 action string for CSV header
         std::string action_header;
@@ -129,7 +129,7 @@ CustomController::CustomController(RobotData &rd) : rd_(rd), //, wbc_(dc.wbc_)
                   << "projected_grav_x\tprojected_grav_y\tprojected_grav_z\t"
                   << "cmd_x\tcmd_y\tcmd_yaw\t"
                 //   << latent_header
-                  << input_header
+                //   << input_header
                   << action_header
                 //   << h0_header
                 //   << "rf_x\trf_y\trf_z\t"
@@ -923,34 +923,34 @@ void CustomController::processEverythingElse()
     for (size_t i = 0; i < num_cur_h; i++){
         h_cur_[i] = output_tensors[output_hn_idx_].GetTensorMutableData<float>()[i];
     }
-    //randonly zero out one h_cur_ value to test robustness
-    // set number of values to zero out
-    int num_values_to_zero = 0;
-    if (true) {
+    // //randonly zero out one h_cur_ value to test robustness
+    // // set number of values to zero out
+    // int num_values_to_zero = 0;
+    // if (true) {
 
-        std::random_device rd;  
-        std::mt19937 gen(rd());
-        std::uniform_int_distribution<> dis(0, num_cur_h - 1);
-        for (int i = 0; i < num_values_to_zero; i++) {
-            int idx_to_zero = dis(gen);
-            h_cur_[idx_to_zero] = 0.0;
-            std::cout << "[Debug] Zeroing out h_cur_ at index " << idx_to_zero << " to test robustness." << std::endl;
-        }
+    //     std::random_device rd;  
+    //     std::mt19937 gen(rd());
+    //     std::uniform_int_distribution<> dis(0, num_cur_h - 1);
+    //     for (int i = 0; i < num_values_to_zero; i++) {
+    //         int idx_to_zero = dis(gen);
+    //         h_cur_[idx_to_zero] = 0.0;
+    //         std::cout << "[Debug] Zeroing out h_cur_ at index " << idx_to_zero << " to test robustness." << std::endl;
+    //     }
 
-        // std::mt19937 gen(rd());
-        // std::uniform_int_distribution<> dis(0, num_cur_h - 1);
-        // int random_index = dis(gen);
-        // h_cur_[random_index] = 0.0;
-        // if (num_values_to_zero > 0) {
-        //     std::cout << "[Debug] Zeroing out " << num_values_to_zero << " values in h_cur_ at random indices to test robustness." << std::endl;
-        //     for (int i = 0; i < num_values_to_zero; i++) {
-        //         int idx_to_zero = dis(gen);
-        //         h_cur_[idx_to_zero] = 0.0;
-        //         std::cout << "[Debug] Zeroing out h_cur_ at index " << idx_to_zero << std::endl;
-        //     }
-        // } else {
-        // std::cout << "[Debug] Zeroing out h_cur_ at index " << random_index << " to test robustness." << std::endl;
-    }
+    //     // std::mt19937 gen(rd());
+    //     // std::uniform_int_distribution<> dis(0, num_cur_h - 1);
+    //     // int random_index = dis(gen);
+    //     // h_cur_[random_index] = 0.0;
+    //     // if (num_values_to_zero > 0) {
+    //     //     std::cout << "[Debug] Zeroing out " << num_values_to_zero << " values in h_cur_ at random indices to test robustness." << std::endl;
+    //     //     for (int i = 0; i < num_values_to_zero; i++) {
+    //     //         int idx_to_zero = dis(gen);
+    //     //         h_cur_[idx_to_zero] = 0.0;
+    //     //         std::cout << "[Debug] Zeroing out h_cur_ at index " << idx_to_zero << std::endl;
+    //     //     }
+    //     // } else {
+    //     // std::cout << "[Debug] Zeroing out h_cur_ at index " << random_index << " to test robustness." << std::endl;
+    // }
     for (size_t i = 0; i < num_cur_latent; i++) {
         latent_cur_[i] = output_tensors[output_latent_idx_].GetTensorMutableData<float>()[i];
     }
@@ -1003,7 +1003,7 @@ void CustomController::processEverythingElse()
     //     file_opened = true;
     // }
     
-    if (debug_counter % 100 == 0) {  // Print every 1000 iterations to avoid spam
+    if (debug_counter % 500 == 0) {  // Print every 1000 iterations to avoid spam
         std::cout << "\n========== SIM2REAL GAP ANALYSIS (iteration " << debug_counter << ") ==========" << std::endl;
 
 // // ========== Dimension-Specific Sim2Real Gap Analysis ==========
@@ -1240,7 +1240,7 @@ void CustomController::processEverythingElse()
     for (size_t i = 0; i < num_cur_critic_state; i++) {
         critic_state_cur_[i] = output_tensors_dn[0].GetTensorMutableData<float>()[i];
     }
-    // std::cout << "value : " << value_ << std::endl;
+    std::cout << "value : " << value_ << std::endl;
     // int data_idx = 0;
     // data_idx += num_cur_state;
     // std::cout << "predicted lin vel : " << critic_state_cur_[data_idx] << "\t" << critic_state_cur_[data_idx+1] << "\t" << critic_state_cur_[data_idx+2] << std::endl;
@@ -1434,7 +1434,7 @@ void CustomController::computeSlow()
 
             // action_dt_accumulate_ += DyrosMath::minmax_cut(rl_action_(num_action-1)*5/hz_, 0.0, 5/hz_);
 
-            if (value_ < 0.1 and value_ != 0)
+            if (value_ < 2. and value_ != 0)
             {
                 if (stop_by_value_thres_ == false)
                 {

@@ -93,7 +93,7 @@ public:
     static const int num_action = 12;
     static const int num_actuator_action = 12;
     static const int num_cur_state = 50;
-    static const int num_cur_critic_state = 167;
+    static const int num_cur_critic_state = 165;
     static const int num_cur_latent = 24;
     static const int num_cur_h = 256;
 
@@ -107,7 +107,7 @@ public:
     std::ofstream writeFile;
     std::ofstream evalFile;
 
-    bool is_on_robot_ = false;
+    bool is_on_robot_ = true;
     bool is_write_file_ = true;
     bool random_command_mode_ = false;
     Eigen::Matrix<double, MODEL_DOF, 1> q_dot_lpf_;
