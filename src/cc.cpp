@@ -90,10 +90,10 @@ CustomController::CustomController(RobotData &rd) : rd_(rd), //, wbc_(dc.wbc_)
         // }
 
         // prepare 47 input string for CSV header
-        // std::string input_header;
-        // for (int i = 0; i < num_cur_state; i++) {
-        //     input_header += "input_" + std::to_string(i) + "\t";
-        // }
+        std::string input_header;
+        for (int i = 0; i < num_cur_state; i++) {
+            input_header += "input_" + std::to_string(i) + "\t";
+        }
 
         // prepare 12 action string for CSV header
         std::string action_header;
@@ -129,7 +129,7 @@ CustomController::CustomController(RobotData &rd) : rd_(rd), //, wbc_(dc.wbc_)
                   << "projected_grav_x\tprojected_grav_y\tprojected_grav_z\t"
                   << "cmd_x\tcmd_y\tcmd_yaw\t"
                 //   << latent_header
-                //   << input_header
+                  << input_header
                   << action_header
                 //   << h0_header
                 //   << "rf_x\trf_y\trf_z\t"
@@ -189,6 +189,7 @@ void CustomController::initVariable()
                 0.3, 0.3, 1.5, -1.27, -1.0, 0.0, -1.0, 0.0,
                 0.0, 0.0,
                 -0.3, -0.3, -1.5, 1.27, 1.0, 0.0, 1.0, 0.0;
+
 
 
     kp_.setZero();
@@ -257,7 +258,7 @@ void CustomController::initVariable()
 
 void CustomController::loadOnnX()
 {
-    string cur_path = "/home/dyros/raibertGRU_ws/src/tocabi_cc/onnx_files_l/";
+    string cur_path = "/home/dyros/raibertGRU_ws/src/tocabi_cc/onnx_files/";
     string actor_path = cur_path + "actor.onnx";
     string normalizer_path = cur_path + "normalizer.onnx";
     string denormalizer_path = cur_path + "denormalizer.onnx";
@@ -267,7 +268,7 @@ void CustomController::loadOnnX()
 
     if (is_on_robot_)
     {
-        cur_path = "/home/dyros/catkin_ws/src/tocabi_cc/onnx_files_l/";
+        cur_path = "/home/dyros/catkin_ws/src/tocabi_cc/onnx_files/";
         actor_path = cur_path + "actor.onnx"; 
         normalizer_path = cur_path + "normalizer.onnx";
         denormalizer_path = cur_path + "denormalizer.onnx";

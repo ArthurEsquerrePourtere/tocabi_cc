@@ -1,4 +1,0 @@
-target_vel_x=0.6
-target_vel_y=0.
-target_vel_yaw=0.
-target_heading=0.

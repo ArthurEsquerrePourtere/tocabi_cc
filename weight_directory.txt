@@ -1,1 +1,0 @@
-weights_path=/home/rui/rui_ws/erfi_ws/AMP_framework/logs/
