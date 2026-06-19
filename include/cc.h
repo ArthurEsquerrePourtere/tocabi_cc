@@ -92,7 +92,7 @@ public:
 
     static const int num_action = 12;
     static const int num_actuator_action = 12;
-    static const int num_cur_state = 50;
+    static const int num_cur_state = 47;
     static const int num_cur_critic_state = 165;
     static const int num_cur_latent = 24;
     static const int num_cur_h = 256;
@@ -133,7 +133,7 @@ public:
     bool use_margin_inference_ = false;
     bool do_inference_ = false;
     bool use_lpf_dof_vel_ = true;
-    double dof_vel_cutoff_freq_ = 60.0;
+    double dof_vel_cutoff_freq_ = 80.0;
     bool use_lpf_ang_vel_ = true;
     double ang_vel_cutoff_freq_ = 8.0;
     bool use_lpf_proj_grav_ = true;
@@ -192,7 +192,7 @@ public:
     // float max_stride_y = 0.12;
     // float max_stride_yaw = 0.4;
     float max_stride_x = 0.4;
-    float max_stride_y = 0.2;
+    float max_stride_y = 0.4;
     float max_stride_yaw = 0.4;
 
     float vel_scale_x_ = 0.6;

@@ -176,19 +176,19 @@ void CustomController::initVariable()
                     10, 10,
                     64, 64, 64, 64, 23, 23, 10, 10;  
                     
-    // q_init_ << 0.0, 0.0, -0.24, 0.6, -0.36, 0.0,
-    //             0.0, 0.0, -0.24, 0.6, -0.36, 0.0,
-    //             0.0, 0.0, 0.0,
-    //             0.3, 0.3, 1.5, -1.27, -1.0, 0.0, -1.0, 0.0,
-    //             0.0, 0.0,
-    //             -0.3, -0.3, -1.5, 1.27, 1.0, 0.0, 1.0, 0.0;
-
-    q_init_ << 0.0, 0.0, -0.46, 1.04, -0.58, -0.0,
-                0.0, -0.0, -0.46, 1.04, -0.58, 0.0,
+    q_init_ << 0.0, 0.0, -0.24, 0.6, -0.36, 0.0,
+                0.0, 0.0, -0.24, 0.6, -0.36, 0.0,
                 0.0, 0.0, 0.0,
                 0.3, 0.3, 1.5, -1.27, -1.0, 0.0, -1.0, 0.0,
                 0.0, 0.0,
                 -0.3, -0.3, -1.5, 1.27, 1.0, 0.0, 1.0, 0.0;
+
+    // q_init_ << 0.0, 0.0, -0.46, 1.04, -0.58, -0.0,
+    //             0.0, -0.0, -0.46, 1.04, -0.58, 0.0,
+    //             0.0, 0.0, 0.0,
+    //             0.3, 0.3, 1.5, -1.27, -1.0, 0.0, -1.0, 0.0,
+    //             0.0, 0.0,
+    //             -0.3, -0.3, -1.5, 1.27, 1.0, 0.0, 1.0, 0.0;
 
 
 
@@ -268,7 +268,7 @@ void CustomController::loadOnnX()
 
     if (is_on_robot_)
     {
-        cur_path = "/home/dyros/catkin_ws/src/tocabi_cc/onnx_files/";
+        cur_path = "/home/dyros/catkin_ws/src/tocabi_cc/onnx_files_r/";
         actor_path = cur_path + "actor.onnx"; 
         normalizer_path = cur_path + "normalizer.onnx";
         denormalizer_path = cur_path + "denormalizer.onnx";
@@ -730,7 +730,7 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
     } 
     // else {
     //     // cout << "Time: " << time_cur_ << endl;
-    commands_(0) = 0.35;
+    commands_(0) = 0.4;
     commands_(1) = 0.;
     commands_(2) = 0.;
     // }
@@ -817,14 +817,14 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
         data_idx++;
     }
 
-    for (int i = 0; i < 3; i++){
-        if (use_lpf_lin_vel_){
-            state_cur_[data_idx] = base_lin_vel_lpf_(i);
-        } else {
-            state_cur_[data_idx] = base_lin_vel(i);
-        }
-        data_idx++;
-    }
+    // for (int i = 0; i < 2; i++){
+    //     if (use_lpf_lin_vel_){
+    //         state_cur_[data_idx] = base_lin_vel_lpf_(i);
+    //     } else {
+    //         state_cur_[data_idx] = base_lin_vel(i);
+    //     }
+    //     data_idx++;
+    // }
 
     assert(data_idx == num_cur_state);
     for (int i = 0; i < num_cur_critic_state; i++){
@@ -1435,7 +1435,7 @@ void CustomController::computeSlow()
 
             // action_dt_accumulate_ += DyrosMath::minmax_cut(rl_action_(num_action-1)*5/hz_, 0.0, 5/hz_);
 
-            if (value_ < 2. and value_ != 0)
+            if (value_ < 1. and value_ != 0)
             {
                 if (stop_by_value_thres_ == false)
                 {
