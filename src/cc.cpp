@@ -1038,7 +1038,7 @@ void CustomController::processEverythingElse()
     //     file_opened = true;
     // }
     
-    if ((debug_counter % 1 == 0 && debug_counter < 10)|| debug_counter % 500 == 0) {  // Print every 1000 iterations to avoid spam
+    if (debug_counter % 500 == 0) {  // Print every 1000 iterations to avoid spam
         std::cout << "\n========== SIM2REAL GAP ANALYSIS (iteration " << debug_counter << ") ==========" << std::endl;
 
 // // ========== Dimension-Specific Sim2Real Gap Analysis ==========
