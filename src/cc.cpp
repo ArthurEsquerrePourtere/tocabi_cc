@@ -131,6 +131,9 @@ CustomController::CustomController(RobotData &rd) : rd_(rd), //, wbc_(dc.wbc_)
                 //   << latent_header
                   << input_header
                   << action_header
+
+                  << "q_des_0\tq_des_1\tq_des_2\tq_des_3\tq_des_4\tq_des_5\t"
+                  << "q_des_6\tq_des_7\tq_des_8\tq_des_9\tq_des_10\tq_des_11\t"
                 //   << h0_header
                 //   << "rf_x\trf_y\trf_z\t"
                 //   << "lf_x\tlf_y\tlf_z\t"
@@ -209,8 +212,10 @@ void CustomController::initVariable()
                         10.0, 28.0, 10.0, 10.0, 10.0, 10.0, 3.0, 3.0;
     kv_.diagonal() /= 3.0;
 
-    pd_limit(0, 0) = -0.6;
-    pd_limit(0, 1) = 0.8;
+    // pd_limit(0, 0) = -0.6;
+    // pd_limit(0, 1) = 0.8;
+    pd_limit(0, 0) = -1.;
+    pd_limit(0, 1) = 1.;
     pd_limit(1, 0) = -1.;
     pd_limit(1, 1) = 1.;
     pd_limit(2, 0) = -1.;
@@ -221,8 +226,10 @@ void CustomController::initVariable()
     pd_limit(4, 1) = 1.;
     pd_limit(5, 0) = -1.;
     pd_limit(5, 1) = 1.;
-    pd_limit(6, 0) = -0.8;
-    pd_limit(6, 1) = 0.6;
+    // pd_limit(6, 0) = -0.8;
+    // pd_limit(6, 1) = 0.6;
+    pd_limit(6, 0) = -1.;
+    pd_limit(6, 1) = 1.;
     pd_limit(7, 0) = -1.;
     pd_limit(7, 1) = 1.;
     pd_limit(8, 0) = -1.;
@@ -245,6 +252,8 @@ void CustomController::initVariable()
     arm_swing_phase_ = 0.0;
 
     projected_grav_lpf_ << 0, 0, -1.;
+    commands_.setZero();
+    commands_desired.setZero();
 
     // Initialize random command generation
     rng_.seed(std::chrono::steady_clock::now().time_since_epoch().count());
@@ -268,7 +277,7 @@ void CustomController::loadOnnX()
 
     if (is_on_robot_)
     {
-        cur_path = "/home/dyros/catkin_ws/src/tocabi_cc/onnx_files_r/";
+        cur_path = "/home/dyros/catkin_ws/src/tocabi_cc/onnx_files/";
         actor_path = cur_path + "actor.onnx"; 
         normalizer_path = cur_path + "normalizer.onnx";
         denormalizer_path = cur_path + "denormalizer.onnx";
@@ -712,16 +721,16 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
     // cout << "Projected Gravity in state : " << state_cur_[3] << ", " << state_cur_[4] << ", " << state_cur_[5] << endl;
 
     float prev_step_period_ = step_period_;
-    if (random_command_mode_){
-        // Random extreme commands every 5 seconds
-        if (time_cur_ - last_command_change_time_ >= 5.0) {
-            commands_(0) = lin_x_dist_(rng_);    // [-0.5, 0.8]
-            commands_(1) = lin_y_dist_(rng_);    // [-0.4, 0.4] 
-            commands_(2) = ang_yaw_dist_(rng_);  // [-0.7, 0.7]
-            last_command_change_time_ = time_cur_;
-            std::cout << "[Random Commands] x:" << commands_(0) << " y:" << commands_(1) << " yaw:" << commands_(2) << std::endl;
-        }
-    }
+    // if (random_command_mode_){
+    //     // Random extreme commands every 5 seconds
+    //     if (time_cur_ - last_command_change_time_ >= 5.0) {
+    //         commands_(0) = lin_x_dist_(rng_);    // [-0.5, 0.8]
+    //         commands_(1) = lin_y_dist_(rng_);    // [-0.4, 0.4] 
+    //         commands_(2) = ang_yaw_dist_(rng_);  // [-0.7, 0.7]
+    //         last_command_change_time_ = time_cur_;
+    //         std::cout << "[Random Commands] x:" << commands_(0) << " y:" << commands_(1) << " yaw:" << commands_(2) << std::endl;
+    //     }
+    // }
 
     // set commands
     if (ctrl_mode == 2 and !is_on_robot_){
@@ -730,33 +739,46 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
     } 
     // else {
     //     // cout << "Time: " << time_cur_ << endl;
-    commands_(0) = 0.4;
-    commands_(1) = 0.;
-    commands_(2) = 0.;
+    // commands_(0) = 0.5;
+    // commands_desired(1) = 0.;
+    // commands_desired(2) = 0.;
+    // }
+    // cout << "[DEBUG] Commands: " << commands_.transpose() << endl;
+
+    // if (command_profile_x_enabled_)
+    // {
+    //     const double t_x = (rd_cc_.control_time_us_ - command_profile_x_start_us_) / 1e6;
+    //     commands_(0) = smoothCommandPulse(t_x, command_profile_x_rise_time_, command_profile_x_hold_time_, command_profile_x_amp_);
+    // }
+    // if (command_profile_y_enabled_)
+    // {
+    //     const double t_y = (rd_cc_.control_time_us_ - command_profile_y_start_us_) / 1e6;
+    //     commands_(1) = smoothCommandPulse(t_y, command_profile_y_rise_time_, command_profile_y_hold_time_, command_profile_y_amp_);
+    // }
+    // if (command_profile_yaw_enabled_)
+    // {
+    //     const double t_yaw = (rd_cc_.control_time_us_ - command_profile_yaw_start_us_) / 1e6;
+    //     commands_(2) = smoothCommandPulse(t_yaw, command_profile_yaw_rise_time_, command_profile_yaw_hold_time_, command_profile_yaw_amp_);
     // }
 
-    if (command_profile_x_enabled_)
-    {
-        const double t_x = (rd_cc_.control_time_us_ - command_profile_x_start_us_) / 1e6;
-        commands_(0) = smoothCommandPulse(t_x, command_profile_x_rise_time_, command_profile_x_hold_time_, command_profile_x_amp_);
-    }
-    if (command_profile_y_enabled_)
-    {
-        const double t_y = (rd_cc_.control_time_us_ - command_profile_y_start_us_) / 1e6;
-        commands_(1) = smoothCommandPulse(t_y, command_profile_y_rise_time_, command_profile_y_hold_time_, command_profile_y_amp_);
-    }
-    if (command_profile_yaw_enabled_)
-    {
-        const double t_yaw = (rd_cc_.control_time_us_ - command_profile_yaw_start_us_) / 1e6;
-        commands_(2) = smoothCommandPulse(t_yaw, command_profile_yaw_rise_time_, command_profile_yaw_hold_time_, command_profile_yaw_amp_);
+    if (heading_mode_ && !command_profile_yaw_enabled_)
+            commands_desired(2) = DyrosMath::minmax_cut(2*heading_error_, -1., 1.);
+
+
+    if (use_lpf_commands_){
+        commands_ = DyrosMath::lpf<3>(commands_desired, commands_, 1/del_t, commands_cutoff_freq_);
+        // cout << "time diff : " << del_t << endl;
+    } else {
+        commands_(0) = commands_desired(0);
+        commands_(1) = commands_desired(1);
+        commands_(2) = commands_desired(2);
     }
     state_cur_[data_idx] = commands_(0);
     data_idx++;
     state_cur_[data_idx] = commands_(1);
     data_idx++;
     // if (heading_mode_) commands_(2) = DyrosMath::minmax_cut(2*heading_error_, -1., 1.);
-    if (heading_mode_ && !command_profile_yaw_enabled_)
-        commands_(2) = DyrosMath::minmax_cut(2*heading_error_, -1., 1.);
+
     state_cur_[data_idx] = commands_(2);
     // cout << "[DEBUG] Heading: " << commands_(2) << endl;
     data_idx++;
@@ -803,12 +825,22 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
     }
     // std::cout << "step ticks : " << step_ticks_ << std::endl;
     // std::cout << "step period : " << step_period_ << std::endl;
-    state_cur_[data_idx] = cos(2*M_PI*(step_ticks_+phase_indicator_*step_period_)/(2*step_period_));
-    // cout << "Phase Indicator: " << phase_indicator_ << endl;
-    // cout << state_cur_[data_idx] << endl;
-    data_idx++;
-    state_cur_[data_idx] = sin(2*M_PI*(step_ticks_+phase_indicator_*step_period_)/(2*step_period_));
-    // cout << state_cur_[data_idx] << endl;
+    // standstill_envs = torch.arange(self.num_envs, device=self.device)[(self.commands[:, 0].abs() < 0.1) & (self.commands[:, 1].abs() < 0.05) & (self.commands[:, 2].abs() < 0.2)]
+    if (stand_still_mode_ && abs(commands_(0)) < 0.1 && abs(commands_(1)) < 0.05 && abs(commands_(2)) < 0.2)
+    {
+        state_cur_[data_idx] = 1.0;
+        data_idx++;
+        state_cur_[data_idx] = 0.0;
+        // cout << step_period_ << endl;
+    } else{
+        state_cur_[data_idx] = cos(2*M_PI*(step_ticks_+phase_indicator_*step_period_)/(2*step_period_));
+        // cout << "Phase Indicator: " << phase_indicator_ << endl;
+        // cout << state_cur_[data_idx] << endl;
+        data_idx++;
+        state_cur_[data_idx] = sin(2*M_PI*(step_ticks_+phase_indicator_*step_period_)/(2*step_period_));
+        // cout << state_cur_[data_idx] << endl;
+    }
+    
     data_idx++;
 
     for (int i = 0; i <num_actuator_action; i++) 
@@ -816,6 +848,8 @@ void CustomController::processObservation() // [linvel, angvel, proj_grav, comma
         state_cur_[data_idx] = DyrosMath::minmax_cut(rl_action_(i), -actions_scale_, actions_scale_);
         data_idx++;
     }
+
+    // cout << "prev actions : " << rl_action_.transpose() << endl;
 
     // for (int i = 0; i < 2; i++){
     //     if (use_lpf_lin_vel_){
@@ -1004,7 +1038,7 @@ void CustomController::processEverythingElse()
     //     file_opened = true;
     // }
     
-    if (debug_counter % 500 == 0) {  // Print every 1000 iterations to avoid spam
+    if ((debug_counter % 1 == 0 && debug_counter < 10)|| debug_counter % 500 == 0) {  // Print every 1000 iterations to avoid spam
         std::cout << "\n========== SIM2REAL GAP ANALYSIS (iteration " << debug_counter << ") ==========" << std::endl;
 
 // // ========== Dimension-Specific Sim2Real Gap Analysis ==========
@@ -1326,6 +1360,9 @@ void CustomController::processEverythingElse()
                 writeFile << rl_action_(i) << "\t";
             }
 
+            //q_desired
+            writeFile << q_desired_.segment(0, 12).transpose() << "\t";
+
             // save evry value from hidden state output tensor
             // for (size_t i = 0; i < num_cur_h; i++) {
             //     writeFile << h_cur_[i] << "\t";
@@ -1388,6 +1425,16 @@ void CustomController::computeSlow()
 
             q_noise_pre_ = q_noise_ = q_init_ = rd_cc_.q_virtual_.segment(6,MODEL_DOF);
 
+            if(ctrl_type == 'P'){
+                // compute fake rl_actions from q_init and pd limits
+                for (int i = 0; i < num_actuator_action; i++){
+                    float q_std = (pd_limit(i, 1) - pd_limit(i, 0)) / 2;
+                    float q_bias = (pd_limit(i, 1) + pd_limit(i, 0)) / 2;
+                    rl_action_(i) = (q_init_(i) - q_bias) / q_std;
+                }
+            }
+            
+
             q_leg_desired_ = rd_cc_.q_.segment(0,12);
 
             time_cur_ = start_time_ / 1e6;
@@ -1397,6 +1444,8 @@ void CustomController::computeSlow()
             // time_inference_pre_ = rd_cc_.control_time_us_ - (1/249.9)*1e6;
 
             time_inference_pre_ = rd_cc_.control_time_us_ - (1/(hz_))*1e6;
+
+            time_pd_pre_ = rd_cc_.control_time_us_ - (1/(pd_hz_))*1e6;
 
             rd_.tc_init = false;
 
@@ -1416,17 +1465,56 @@ void CustomController::computeSlow()
         processBias();
 
         if (use_margin_inference_){
-            do_inference_ = (rd_cc_.control_time_us_ - time_inference_pre_)/1.0e6 >= (1/hz_)-(1/pd_hz_)/2;
-            // cout << "Using margin for inference timing: " << (1/hz_)-(1/pd_hz_)/2 << " seconds." << endl;
+            do_inference_ = (rd_cc_.control_time_us_ - time_inference_pre_)/1.0e6 >= (1/hz_)-(1/sim_hz_)/2;
+            // cout << "Using margin for inference timing: " << (1/hz_)-(1/sim_hz_)/2 << " seconds." << endl;
             // cout << do_inference_ << endl;
         } else {
             do_inference_ = (rd_cc_.control_time_us_ - time_inference_pre_)/1.0e6 >= (1/hz_);
         }
 
+        // do_pd = (rd_cc_.control_time_us_ - time_pd_pre_)/1.0e6 >= (1/pd_hz_);
+        do_pd = true;
+
         // if ((rd_cc_.control_time_us_ - time_inference_pre_)/1.0e6 >= 1/hz_) // 125 is the control frequency
         if (do_inference_)
         {
+            real_del_t = (rd_cc_.control_time_us_ - time_inference_pre_)/1.0e6;
             // cout << ":::::::::::::::: DOING INFERENCE ::::::::::::::" << std::endl;
+            if (count_steps_ > -1){
+                commands_desired(0) = 0.0;
+                commands_desired(1) = 0.;
+                commands_desired(2) = 0.0;
+            }
+            if (count_steps_ >= 2){
+                commands_desired(0) = 0.4;
+                commands_desired(1) = 0.;
+                commands_desired(2) = 0.;
+            }
+            // if (count_steps_ >= 16){
+            //     commands_desired(0) = -0.25;
+            //     commands_desired(1) = 0.;
+            //     commands_desired(2) = 0.;
+            // }
+            // if (count_steps_ >= 26){
+            //     commands_desired(0) = 0.;
+            //     commands_desired(1) = 0.3;
+            //     commands_desired(2) = 0.;
+            // }
+            // if (count_steps_ >= 36){
+            //     commands_desired(0) = 0.;
+            //     commands_desired(1) = 0.;
+            //     commands_desired(2) = -0.4;
+            // }
+            // if (count_steps_ >= 46){
+            //     commands_desired(0) = 0.;
+            //     commands_desired(1) = 0.;
+            //     commands_desired(2) = 0.4;
+            // }
+
+        // if (rd_cc_.control_time_us_ > start_time_ + 1.e6){
+        //     exit(0);
+        // }
+
             processObservation();
 
             feedforwardPolicy();
@@ -1435,7 +1523,7 @@ void CustomController::computeSlow()
 
             // action_dt_accumulate_ += DyrosMath::minmax_cut(rl_action_(num_action-1)*5/hz_, 0.0, 5/hz_);
 
-            if (value_ < 1. and value_ != 0)
+            if (value_ < 2. and value_ != 0)
             {
                 if (stop_by_value_thres_ == false)
                 {
@@ -1459,10 +1547,56 @@ void CustomController::computeSlow()
             if (ctrl_type == 'P'){
                 float q_std = (pd_limit(i, 1) - pd_limit(i, 0)) / 2;
                 float q_bias = (pd_limit(i, 1) + pd_limit(i, 0)) / 2;
-                torque_rl_(i) = DyrosMath::minmax_cut(kp_(i,i) * (DyrosMath::minmax_cut(rl_action_(i), -1., 1.) * q_std + q_bias - q_noise_(i)) - kv_(i,i)*q_vel_noise_(i), -torque_bound_(i), torque_bound_(i));
+                if (rd_cc_.control_time_us_ < start_time_ + 0.0e6)
+                {
+                    // to do here spline
+                    const float q_rl_target = DyrosMath::minmax_cut(rl_action_(i), -1.f, 1.f) * q_std + q_bias;
+
+                    // const float q_spline_target = DyrosMath::cubic(rd_cc_.control_time_us_, start_time_ + 0.e6, start_time_ + 0.1e6, q_init_(i), q_rl_target, 0.0, 0.0);
+
+                    // torque_rl_(i) = DyrosMath::minmax_cut(kp_(i, i) * (q_init_(i) - q_noise_(i)) - kv_(i, i) * q_vel_noise_(i),-torque_bound_(i), torque_bound_(i));
+                    // cout << "q_init_: " << q_init_(i) << ", q_noise_: " << q_noise_(i) << " diff: " << q_init_(i) - q_noise_(i) << endl;
+                    if (do_pd){
+                        torque_rl_(i) = DyrosMath::minmax_cut(kp_(i, i ) * (q_init_(i) - q_noise_(i)) - kv_(i,i) * q_vel_noise_(i), -torque_bound_(i), torque_bound_(i));
+                        time_pd_pre_ = rd_cc_.control_time_us_;
+                    }
+                    
+                } else{
+                    const float spline_duration = 0.6e6; // Duration of the spline in microseconds
+                    if (rd_cc_.control_time_us_ < start_time_ + spline_duration)
+                    {
+                        // to do here spline
+                        const float q_rl_target = DyrosMath::minmax_cut(rl_action_(i), -1.f, 1.f) * q_std + q_bias;
+
+
+                        const float q_spline_target = DyrosMath::cubic(rd_cc_.control_time_us_, start_time_ + 0.0e6, start_time_ + spline_duration, q_init_(i), q_rl_target, 0.0, 0.0);
+
+                        q_desired_(i) = q_spline_target;
+
+                        // cout << "q rl target: " << q_rl_target << endl << ", q spline target: " << q_spline_target << endl;
+
+                        // const float spline_kp = DyrosMath::cubic(rd_cc_.control_time_us_, start_time_ + 0.0e6, start_time_ + spline_duration, kp_(i, i) *9, kp_(i, i), 0.0, 0.0);
+                        // const float spline_kv = DyrosMath::cubic(rd_cc_.control_time_us_, start_time_ + 0.0e6, start_time_ + spline_duration, kv_(i, i) *3, kv_(i, i), 0.0, 0.0);
+
+                        // torque_rl_(i) = DyrosMath::minmax_cut(spline_kp * (q_spline_target - q_noise_(i)) - spline_kv * q_vel_noise_(i),-torque_bound_(i), torque_bound_(i));
+                        torque_rl_(i) = DyrosMath::minmax_cut(kp_(i, i) * (q_spline_target - q_noise_(i)) - kv_(i, i) * q_vel_noise_(i), -torque_bound_(i), torque_bound_(i));
+                        // // cout << "q_init_: " << q_init_(i) << ", q_noise_: " << q_noise_(i) << " diff: " << q_init_(i) - q_noise_(i) << endl;
+                        // torque_rl_(i) = DyrosMath::minmax_cut(kp_(i, i ) * (q_init_(i) - q_noise_(i)) - kv_(i,i) * q_vel_noise_(i), -torque_bound_(i), torque_bound_(i));
+                    } else{
+                        // cout << "here" << endl;
+                        // cout << "normal pos" << DyrosMath::minmax_cut(rl_action_(i), -1., 1.) * q_std + q_bias - q_noise_(i) << endl;
+                        if (do_pd){
+                            q_desired_(i) = DyrosMath::minmax_cut(rl_action_(i), -1., 1.) * q_std + q_bias;
+                            torque_rl_(i) = DyrosMath::minmax_cut(kp_(i, i) * (DyrosMath::minmax_cut(rl_action_(i), -1., 1.) * q_std + q_bias - q_noise_(i)) - kv_(i,i) *q_vel_noise_(i), -torque_bound_(i), torque_bound_(i));
+                            time_pd_pre_ = rd_cc_.control_time_us_;
+                        }
+                    }
+                }
             }
-            
         }
+        // cout << endl << endl;
+        // if (rd_cc_.control_time_us_ > start_time_ + 0.04e6)
+        //     exit(0);
 
         // if (do_inference_){
         //     cout << "action RL before scaling: " << rl_action_.transpose() << endl;
@@ -1589,10 +1723,10 @@ void CustomController::computeSlow()
             torque_sum_lpf_ = torque_init_.head(12);
         } 
         else{
-            if (rd_cc_.control_time_us_ < start_time_ + 0.1e6)
+            if (rd_cc_.control_time_us_ < start_time_ + 0.e6)
             {
                 for (int i = 0; i <MODEL_DOF; i++)
-                    torque_spline_(i) = DyrosMath::cubic(rd_cc_.control_time_us_, start_time_ + 0.e6, start_time_ + 0.1e6, torque_init_(i), torque_rl_(i), 0.0, 0.0);
+                    torque_spline_(i) = DyrosMath::cubic(rd_cc_.control_time_us_, start_time_ + 0.e6, start_time_ + 0.e6, torque_init_(i), torque_rl_(i), 0.0, 0.0);
 
                 rd_.torque_desired = torque_spline_;
                 torque_sum_lpf_ = torque_spline_.head(12);    
@@ -1601,8 +1735,8 @@ void CustomController::computeSlow()
                 if (use_lpf_torque_){
                     for (int i = 0; i < 12; i++){
                         // if (i==4 || i==5 || i==10 || i==11){
-                        torque_sum_lpf_(i) = 1 / (1 + 2 * M_PI * torque_cutoff_freq * (1/pd_hz_)) * torque_sum_lpf_(i) //previous tick torque
-                                        + (2 * M_PI * torque_cutoff_freq * (1/pd_hz_)) / (1 + 2 * M_PI * torque_cutoff_freq * (1/pd_hz_)) * torque_rl_(i); //updated torque
+                        torque_sum_lpf_(i) = 1 / (1 + 2 * M_PI * torque_cutoff_freq * (1/sim_hz_)) * torque_sum_lpf_(i) //previous tick torque
+                                        + (2 * M_PI * torque_cutoff_freq * (1/sim_hz_)) / (1 + 2 * M_PI * torque_cutoff_freq * (1/sim_hz_)) * torque_rl_(i); //updated torque
                         // }
                         // else{
                         //     torque_sum_lpf_(i) = torque_rl_(i);
@@ -1731,15 +1865,18 @@ void CustomController::loadCommand(const std::string &command_file)
 void CustomController::updateNextStepTime()
 {       
     // static double count_ticks = 0.;
-    // if (count_ticks < hz_ * 2.0) {
+    // if (count_ticks < hz_ * 0.8) {
     //     count_ticks += 1.0;
     //     step_ticks_ = -1.;
     //     return;
     // }
+    // cout << "Step ticks: " << step_ticks_ << ", Step period: " << step_period_ << endl;
     step_ticks_ += del_t;
+    // step_ticks_ += real_del_t;
     if (step_ticks_ >= step_period_) {
         step_ticks_ = 0.;
         phase_indicator_ = 1-phase_indicator_;
+        count_steps_ += 1;
         // cout << "Step! Phase indicator: " << phase_indicator_ << endl;
     }
 }
@@ -1776,8 +1913,8 @@ void CustomController::updateNextStepTime()
 void CustomController::joyCallback(const sensor_msgs::Joy::ConstPtr& joy)
 {
     cout << "Joy Callback!" << endl;
-    commands_(0) = DyrosMath::minmax_cut(vel_scale_x_*joy->axes[1], -0.5, 1.);
-    commands_(1) = DyrosMath::minmax_cut(vel_scale_y_*joy->axes[0] , -0.5, 0.5);
+    commands_desired(0) = DyrosMath::minmax_cut(vel_scale_x_*joy->axes[1], -0.5, 1.);
+    commands_desired(1) = DyrosMath::minmax_cut(vel_scale_y_*joy->axes[0] , -0.5, 0.5);
 
     if (joy->buttons[1] == 1.0 && vel_scale_x_ < 1.0 && vel_scale_y_ < 0.3){
         vel_scale_x_ += 0.03;
@@ -1802,11 +1939,11 @@ void CustomController::joyCallback(const sensor_msgs::Joy::ConstPtr& joy)
     //     commands_(2) = 0.;
     // }
     if (joy->axes[2] < 1. && joy->axes[2] != 0.){
-        commands_(2) = DyrosMath::minmax_cut(-(joy->axes[2]-1), 0., 2.)/4.;
+        commands_desired(2) = DyrosMath::minmax_cut(-(joy->axes[2]-1), 0., 2.)/4.;
     } else if (joy->axes[5] < 1. && joy->axes[5] != 0.){
-        commands_(2) = -DyrosMath::minmax_cut(-(joy->axes[5]-1), 0., 2.)/4.;
+        commands_desired(2) = -DyrosMath::minmax_cut(-(joy->axes[5]-1), 0., 2.)/4.;
     } else {
-        commands_(2) = 0.;
+        commands_desired(2) = 0.;
     }
 }
 
@@ -1857,12 +1994,14 @@ void CustomController::updateCommandFromTimeline(const std::string &command_file
     int index = static_cast<int>(elapsed / 5.0);
 
     if (index < timeline.size()) {
-        commands_(0) = timeline[index](0);
-        commands_(1) = timeline[index](1);
-        commands_(2) = timeline[index](2);
+        commands_desired(0) = timeline[index](0);
+        commands_desired(1) = timeline[index](1);
+        commands_desired(2) = timeline[index](2);
     } else {
         // Optional: Stop the robot when timeline ends
-        commands_.setZero();
+        // commands_.setZero();
+        commands_desired.setZero();
+
     }
 }
 

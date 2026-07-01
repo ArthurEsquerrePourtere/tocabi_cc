@@ -19,7 +19,10 @@ public:
 
     const double hz_ = 125;
     const double pd_hz_ = 2000;
+    const double sim_hz_ = 2000;
     double del_t = 1 / hz_;
+    double real_del_t = 1 / hz_;
+    int count_steps_ = 0;
 
     void computeSlow();
     void computeFast();
@@ -116,6 +119,7 @@ public:
     Eigen::Matrix<double, MODEL_DOF, 1> q_noise_;
     Eigen::Matrix<double, MODEL_DOF, 1> q_noise_pre_;
     Eigen::Matrix<double, MODEL_DOF, 1> q_vel_noise_;
+    Eigen::Matrix<double, MODEL_DOF, 1> q_desired_;
     Eigen::Vector12d q_leg_desired_;
 
     Eigen::Matrix<double, MODEL_DOF, 1> torque_init_;
@@ -123,17 +127,18 @@ public:
     Eigen::Matrix<double, MODEL_DOF, 1> torque_rl_;
     Eigen::Matrix<double, MODEL_DOF, 1> torque_bound_;
     Eigen::Matrix<double, num_action, 2> pd_limit;
-    const char ctrl_type = 'T';
+    const char ctrl_type = 'P';
 
     // ART specific variables
     Eigen::Matrix<double, 12, 1> torque_sum_lpf_;
     bool use_lpf_torque_ = false;
-    double torque_cutoff_freq = 20.0;
+    double torque_cutoff_freq = 40.0;
     Eigen::MatrixXd prev_rl_action_;
     bool use_margin_inference_ = false;
     bool do_inference_ = false;
+    bool do_pd = false;
     bool use_lpf_dof_vel_ = true;
-    double dof_vel_cutoff_freq_ = 80.0;
+    double dof_vel_cutoff_freq_ = 60.0;
     bool use_lpf_ang_vel_ = true;
     double ang_vel_cutoff_freq_ = 8.0;
     bool use_lpf_proj_grav_ = true;
@@ -144,6 +149,9 @@ public:
     Vector3_t projected_grav_lpf_;
     bool tanh_dof_vel_ = false;
     double tanh_dof_vel_scale_ = 3.0;
+    bool stand_still_mode_ = true;
+    bool use_lpf_commands_ = true;
+    double commands_cutoff_freq_ = 8.;
 
 
     Eigen::Matrix<double, MODEL_DOF, MODEL_DOF> kp_;
@@ -151,6 +159,7 @@ public:
 
     float start_time_;
     float time_inference_pre_ = 0.0;
+    float time_pd_pre_ = 0.0;
     float time_write_pre_ = 0.0;
 
     double time_cur_;
@@ -182,6 +191,7 @@ public:
     // BIPED WALKING PARAMETER
     float phase_indicator_ = 0;
     Eigen::Vector3d commands_;
+    Eigen::Vector3d commands_desired;
     Eigen::Vector3d command_vel_filtered_;
     Eigen::Vector3d command_vel_filtered_prev_;
     double target_heading_;
