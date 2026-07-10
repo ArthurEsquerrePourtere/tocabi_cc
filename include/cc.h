@@ -120,6 +120,7 @@ public:
     Eigen::Matrix<double, MODEL_DOF, 1> q_noise_pre_;
     Eigen::Matrix<double, MODEL_DOF, 1> q_vel_noise_;
     Eigen::Matrix<double, MODEL_DOF, 1> q_desired_;
+    Eigen::Matrix<double, num_action, 1> q_desired_lpf_;
     Eigen::Vector12d q_leg_desired_;
 
     Eigen::Matrix<double, MODEL_DOF, 1> torque_init_;
@@ -133,6 +134,8 @@ public:
     Eigen::Matrix<double, 12, 1> torque_sum_lpf_;
     bool use_lpf_torque_ = false;
     double torque_cutoff_freq = 40.0;
+    bool use_lpf_actions_ = false;
+    double actions_cutoff_freq = 20.;
     Eigen::MatrixXd prev_rl_action_;
     bool use_margin_inference_ = false;
     bool do_inference_ = false;

@@ -277,7 +277,7 @@ void CustomController::loadOnnX()
 
     if (is_on_robot_)
     {
-        cur_path = "/home/dyros/catkin_ws/src/tocabi_cc/onnx_files/";
+        cur_path = "/home/dyros/catkin_ws/src/tocabi_cc/onnx_files_Jul01_15/";
         actor_path = cur_path + "actor.onnx"; 
         normalizer_path = cur_path + "normalizer.onnx";
         denormalizer_path = cur_path + "denormalizer.onnx";
@@ -1432,6 +1432,7 @@ void CustomController::computeSlow()
                     float q_bias = (pd_limit(i, 1) + pd_limit(i, 0)) / 2;
                     rl_action_(i) = (q_init_(i) - q_bias) / q_std;
                 }
+                q_desired_lpf_ = q_init_.head<12>();
             }
             
 
@@ -1523,6 +1524,19 @@ void CustomController::computeSlow()
 
             // action_dt_accumulate_ += DyrosMath::minmax_cut(rl_action_(num_action-1)*5/hz_, 0.0, 5/hz_);
 
+            if (ctrl_type == 'P' && use_lpf_actions_){
+                for (int i = 0; i < num_actuator_action; i++){
+                    float q_std = (pd_limit(i, 1) - pd_limit(i, 0)) / 2;
+                    float q_bias = (pd_limit(i, 1) + pd_limit(i, 0)) / 2;
+                    q_desired_(i) = DyrosMath::minmax_cut(rl_action_(i), -1., 1.) * q_std + q_bias;
+                }
+                //q_desired_lpf_ = 1 / (1 + 2 * M_PI * actions_cutoff_freq * (1/hz_)) * q_desired_lpf_(i) + (2 * M_PI * actions_cutoff_freq * (1/hz_)) / (1 + 2 * M_PI * actions_cutoff_freq * (1/hz_)) * q_desired_(i);
+                cout << "q_desired_ before: " << q_desired_.transpose() << endl;
+                cout << "q_desired_lpf_ before: " << q_desired_lpf_.transpose() << endl;
+                q_desired_lpf_ = DyrosMath::lpf<12>(q_desired_.head<12>(), q_desired_lpf_, hz_, actions_cutoff_freq);
+                cout << "q_desired_lpf_ after: " << q_desired_lpf_.transpose() << endl;
+            }
+
             if (value_ < 2. and value_ != 0)
             {
                 if (stop_by_value_thres_ == false)
@@ -1573,6 +1587,8 @@ void CustomController::computeSlow()
 
                         q_desired_(i) = q_spline_target;
 
+                        q_desired_lpf_(i) = q_desired_(i);
+
                         // cout << "q rl target: " << q_rl_target << endl << ", q spline target: " << q_spline_target << endl;
 
                         // const float spline_kp = DyrosMath::cubic(rd_cc_.control_time_us_, start_time_ + 0.0e6, start_time_ + spline_duration, kp_(i, i) *9, kp_(i, i), 0.0, 0.0);
@@ -1586,9 +1602,14 @@ void CustomController::computeSlow()
                         // cout << "here" << endl;
                         // cout << "normal pos" << DyrosMath::minmax_cut(rl_action_(i), -1., 1.) * q_std + q_bias - q_noise_(i) << endl;
                         if (do_pd){
-                            q_desired_(i) = DyrosMath::minmax_cut(rl_action_(i), -1., 1.) * q_std + q_bias;
-                            torque_rl_(i) = DyrosMath::minmax_cut(kp_(i, i) * (DyrosMath::minmax_cut(rl_action_(i), -1., 1.) * q_std + q_bias - q_noise_(i)) - kv_(i,i) *q_vel_noise_(i), -torque_bound_(i), torque_bound_(i));
-                            time_pd_pre_ = rd_cc_.control_time_us_;
+                            if (use_lpf_actions_){
+                                q_desired_(i) = q_desired_lpf_(i);
+                            } else {
+                                q_desired_(i) = DyrosMath::minmax_cut(rl_action_(i), -1., 1.) * q_std + q_bias;
+                            }
+                            // torque_rl_(i) = DyrosMath::minmax_cut(kp_(i, i) * (DyrosMath::minmax_cut(rl_action_(i), -1., 1.) * q_std + q_bias - q_noise_(i)) - kv_(i,i) *q_vel_noise_(i), -torque_bound_(i), torque_bound_(i));
+                            // time_pd_pre_ = rd_cc_.control_time_us_;
+                            torque_rl_(i) = DyrosMath::minmax_cut(kp_(i, i) * (q_desired_(i) - q_noise_(i)) - kv_(i,i) *q_vel_noise_(i), -torque_bound_(i), torque_bound_(i));
                         }
                     }
                 }
