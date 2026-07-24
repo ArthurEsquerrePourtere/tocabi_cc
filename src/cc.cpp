@@ -277,7 +277,7 @@ void CustomController::loadOnnX()
 
     if (is_on_robot_)
     {
-        cur_path = "/home/dyros/catkin_ws/src/tocabi_cc/onnx_files/";
+        cur_path = "/home/dyros/catkin_ws/src/tocabi_cc/onnx_files_15_17/";
         actor_path = cur_path + "actor.onnx"; 
         normalizer_path = cur_path + "normalizer.onnx";
         denormalizer_path = cur_path + "denormalizer.onnx";
